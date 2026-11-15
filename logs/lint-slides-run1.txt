@@ -1,0 +1,16 @@
+== 簡報（22 頁） 檢查 ==
+ERROR S3 第 8 頁數字 6 不在引用 claim 的 numbers 內（引用：C35）
+ERROR S3 第 8 頁數字 4 不在引用 claim 的 numbers 內（引用：C35）
+ERROR S3 第 8 頁數字 6 不在引用 claim 的 numbers 內（引用：C35）
+ERROR S3 第 8 頁數字 4 不在引用 claim 的 numbers 內（引用：C35）
+ERROR S3 第 9 頁數字 40 不在引用 claim 的 numbers 內（引用：C33,C41）
+ERROR S3 第 9 頁數字 40 不在引用 claim 的 numbers 內（引用：C33,C41）
+ERROR S3 第 9 頁數字 40 不在引用 claim 的 numbers 內（引用：C33,C41）
+ERROR S3 第 10 頁數字 100 不在引用 claim 的 numbers 內（引用：C06,C07）
+ERROR S3 第 10 頁數字 16 不在引用 claim 的 numbers 內（引用：C06,C07）
+ERROR S3 第 14 頁數字 0.2.5 不在引用 claim 的 numbers 內（引用：C15,C16,C17,C18）
+ERROR S3 第 15 頁數字 1 不在引用 claim 的 numbers 內（引用：C29,C25）
+ERROR S3 第 15 頁數字 2 不在引用 claim 的 numbers 內（引用：C29,C25）
+ERROR S3 第 16 頁數字 4090 不在引用 claim 的 numbers 內（引用：C25,C28,C27,C26）
+ERROR S3 第 16 頁數字 7 不在引用 claim 的 numbers 內（引用：C25,C28,C27,C26）
+結果：14 個錯誤、0 個警告

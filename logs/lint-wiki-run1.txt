@@ -1,0 +1,5 @@
+== Wiki 檢查 ==
+WARN  W3 prefix-caching.md: 引用 extract-only C12（簡報不得使用）
+WARN  W3 prefix-caching.md: 引用 extract-only C11（簡報不得使用）
+WARN  W3 prefix-caching.md: 引用 extract-only C11（簡報不得使用）
+結果：0 個錯誤、3 個警告
