@@ -1,0 +1,578 @@
+<title>KV Cache 教學簡報</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: a 16:9 stage scaled to the viewport, one slide at a time. Under 760px the deck becomes a vertical scroll of cards.
+   Color is meaning: teal = computed this step, amber = reused from the cache, red = sources disagree. */
+:root{
+  --bg:#EDF0F3; --surface:#FFFFFF; --soft:#F3F5F8; --ink:#14202B; --muted:#566574; --line:#D2D9E0;
+  --accent:#0A7771; --warm:#A85F00; --warn:#B3261E;
+  --font:"Noto Sans TC",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D1318; --surface:#151D25; --soft:#1B252E; --ink:#E7EDF2; --muted:#9AA9B6; --line:#2A3641;
+    --accent:#3CC7BE; --warm:#F0A93B; --warn:#FF8A80; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D1318; --surface:#151D25; --soft:#1B252E; --ink:#E7EDF2; --muted:#9AA9B6; --line:#2A3641;
+  --accent:#3CC7BE; --warm:#F0A93B; --warn:#FF8A80; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);overflow:hidden;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0}
+#root{height:100%;display:flex;flex-direction:column}
+#viewport{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.fit{position:relative;flex:none}
+.stage{position:absolute;left:0;top:0;width:1280px;height:720px;transform-origin:0 0}
+
+.slide{position:absolute;inset:0;display:none;flex-direction:column;gap:18px;padding:40px 60px 52px;
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:22px;line-height:1.55}
+.slide.on{display:flex}
+.kicker{font-family:var(--mono);font-size:.62em;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1,h2,h3,p,ul,ol{margin:0}
+h2{font-size:1.55em;line-height:1.25;font-weight:700;text-wrap:balance}
+h1{font-size:2.9em;line-height:1.15;font-weight:700;text-wrap:balance}
+h3{font-size:1em;font-weight:700}
+.lead{font-size:1em;color:var(--ink);max-width:62em}
+.muted{color:var(--muted)}
+.small{font-size:.78em}
+ul.list{padding-left:1.1em;display:flex;flex-direction:column;gap:.35em}
+code,.mono{font-family:var(--mono);font-size:.9em}
+.src{position:absolute;left:60px;right:60px;bottom:16px;font-family:var(--mono);font-size:13px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap}
+.src a{color:var(--muted)}
+
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px;min-height:0}
+.cols>*{min-width:0}
+.card{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.callout{background:color-mix(in srgb,var(--warn) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));border-radius:10px;padding:12px 18px}
+.hint{background:color-mix(in srgb,var(--accent) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:10px;padding:12px 18px}
+
+.tokens{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.tok{font-family:var(--mono);font-size:.82em;padding:.2em .6em;border:1.5px solid var(--line);border-radius:6px;background:var(--surface);white-space:nowrap}
+.tok.hit{border-color:var(--warm);background:color-mix(in srgb,var(--warm) 16%,var(--surface))}
+.tok.new{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 18%,var(--surface))}
+.tok.off{border-style:dashed;color:var(--muted)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:.72em;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:.9em;height:.9em;border-radius:3px;margin-right:.4em;vertical-align:-.1em;border:1.5px solid var(--line)}
+.legend .l-hit::before{border-color:var(--warm);background:color-mix(in srgb,var(--warm) 25%,transparent)}
+.legend .l-new::before{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 25%,transparent)}
+
+.flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.step{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:.82em;flex:1 1 150px;min-width:0}
+.step b{display:block;font-size:1.02em}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.tile{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+.tile .big{font-family:var(--mono);font-weight:500;font-size:1.9em;line-height:1.1;color:var(--accent)}
+.tile .cap{font-size:.74em;color:var(--muted);margin-top:.35em}
+table{border-collapse:collapse;width:100%;font-size:.82em}
+th,td{text-align:left;padding:.45em .7em;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:.78em;letter-spacing:.06em;color:var(--muted);font-weight:500}
+.tl{display:flex;gap:6px;align-items:stretch}
+.tl>div{border-radius:8px;padding:.5em .7em;font-size:.76em;border:1.5px solid var(--line);background:var(--soft)}
+.tl .pre{flex:3;border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.tl .dec{flex:1;border-color:var(--warm);background:color-mix(in srgb,var(--warm) 12%,var(--surface));text-align:center}
+.bar{display:flex;height:2.3em;border-radius:8px;overflow:hidden;border:1px solid var(--line);font-size:.78em}
+.bar>div{display:flex;align-items:center;padding:0 .8em;white-space:nowrap}
+.bar .w{background:color-mix(in srgb,var(--muted) 28%,var(--surface))}
+.bar .k{background:color-mix(in srgb,var(--warm) 22%,var(--surface));flex:1;min-width:0}
+.hbar{height:1.1em;border-radius:5px;background:color-mix(in srgb,var(--accent) 70%,var(--surface))}
+.mem{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+.mem div{height:2.1em;border-radius:6px;border:1.5px solid var(--line);background:var(--soft);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.8em}
+.mem .a{border-color:var(--warm);background:color-mix(in srgb,var(--warm) 20%,var(--surface))}
+.mem .o{background:color-mix(in srgb,var(--muted) 22%,var(--surface))}
+.eq{font-family:var(--mono);font-size:1.15em;padding:.5em .8em;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
+svg text{font-family:var(--font);font-size:14px;fill:var(--ink)}
+svg .n{fill:var(--soft);stroke:var(--line);stroke-width:1.5}
+svg .h{fill:color-mix(in srgb,var(--warm) 16%,var(--surface));stroke:var(--warm);stroke-width:1.5}
+svg .e{stroke:var(--muted);stroke-width:1.5;fill:none}
+.demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-height:0}
+.demo-col{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.demo-col h3{font-size:.85em}
+.row{display:flex;gap:10px;align-items:center;font-size:.72em}
+.row .lab{font-family:var(--mono);color:var(--muted);flex:none;width:4.8em;white-space:nowrap}
+.tot{font-family:var(--mono);font-size:.78em;color:var(--muted);margin-top:auto}
+button{font:inherit;font-size:.72em;padding:.4em 1em;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btns{display:flex;gap:10px;align-items:center}
+details{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:.85em}
+details+details{margin-top:10px}
+summary{cursor:pointer;font-weight:500}
+details p{margin-top:.5em;color:var(--muted)}
+
+#nav{flex:none;display:flex;align-items:center;justify-content:center;gap:14px;height:44px;font-family:var(--mono);font-size:13px;color:var(--muted);padding-bottom:env(safe-area-inset-bottom,0px)}
+#nav button{font-size:13px;padding:.35em .9em}
+#bar{position:fixed;left:0;right:0;top:0;height:3px;background:transparent}
+#bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+
+@media (max-width:760px){
+  body{overflow:auto;height:auto}
+  html{height:auto}
+  #root{height:auto}
+  #viewport{display:block;padding-block:12px}
+  .fit{width:auto!important;height:auto!important}
+  .stage{position:static;width:auto;height:auto;transform:none!important;display:flex;flex-direction:column;gap:14px}
+  .slide{position:relative;inset:auto;display:flex;font-size:15px;padding:20px 16px 40px;overflow:visible}
+  .src{left:16px;right:16px;bottom:12px;font-size:11px}
+  .cols,.demo-grid{grid-template-columns:1fr}
+  .tiles{grid-template-columns:1fr 1fr}
+  h1{font-size:2em}
+  #nav,#bar{display:none}
+  .tl{flex-direction:column}
+  .row{flex-wrap:wrap}
+}
+@media (prefers-reduced-motion:reduce){#bar i{transition:none}}
+</style>
+
+<div id="bar"><i></i></div>
+<div id="root">
+<div id="viewport"><div class="fit" id="fit"><div class="stage" id="stage">
+
+<!-- 1 -->
+<section class="slide" data-claims="none">
+  <div class="kicker">KV Cache LLM Wiki · 教學簡報</div>
+  <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:22px">
+    <h1>KV Cache：讓 LLM 不再重複計算</h1>
+    <p class="lead muted" style="font-size:1.15em">從單一請求內的快取，到跨請求的重用：為什麼它讓 LLM 變快、要付出什麼代價、又有哪些做法。</p>
+    <div class="tokens"><span class="tok hit">The</span><span class="tok hit">cat</span><span class="tok hit">sat</span><span class="tok hit">on</span><span class="tok new">the</span><span class="muted small">← 算過的留著，只算新的</span></div>
+  </div>
+  <div class="small muted nocheck">本簡報全部內容取自自建的 KV Cache LLM Wiki（6 篇一手來源，2026-11-15）· 按 ← → 或下方按鈕翻頁</div>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-claims="none">
+  <div class="kicker">方法 · 這份簡報怎麼做出來的</div>
+  <h2>先建 Wiki，再用 Wiki 出簡報，每一頁都要對得回來源</h2>
+  <div class="flow">
+    <div class="step"><b>蒐集來源</b>論文與官方文件</div>
+    <div class="step"><b>Ingest</b>先討論、後生成，寫成來源頁與概念頁</div>
+    <div class="step"><b>Lint</b>術語、標註、數字是否有一手全文佐證</div>
+    <div class="step"><b>查 Wiki</b>排出教學大綱</div>
+    <div class="step"><b>逐頁生成</b>每頁宣告引用哪些 claim</div>
+    <div class="step"><b>逐頁檢查</b>不通過就退回重生成該頁</div>
+  </div>
+  <div class="cols" style="margin-top:6px">
+    <div class="card"><h3>怎麼讀每一頁</h3><p class="small">頁面底部的 <code>C##</code> 是這頁引用的 Wiki claim；沒有標示的頁面是純解說。頁面上的數字，必須出現在被引用的 claim 裡。</p></div>
+    <div class="card"><h3>Wiki 目前的規模</h3><p class="small nocheck">6 篇一手來源 · 43 條 claim · 8 項來源衝突紀錄。部分數字只有擷取摘要，標為 extract-only，沒有用在本簡報。</p></div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-claims="none">
+  <div class="kicker">基礎 · 問題</div>
+  <h2>LLM 一次只吐一個 token</h2>
+  <p class="lead">LLM 回答的方式：看完前面全部的內容，預測下一個 token，接在後面，再預測下一個，直到結束。token 是字或詞的片段。這個迴圈叫自回歸（autoregressive）生成。</p>
+  <div class="card">
+    <div class="tokens"><span class="tok">The</span><span class="tok">cat</span><span class="tok">sat</span><span class="tok">on</span><span class="muted">→</span><span class="tok new">the</span><span class="muted">→</span><span class="tok new">mat</span><span class="muted">→</span><span class="tok off">…</span></div>
+    <p class="small muted">（解說）每多生成一個 token，前面的內容就更長一點。如果每一步都把前面整段重看一遍，大量的計算其實是重複的。</p>
+  </div>
+  <div class="hint"><b>這份簡報要回答的事：</b>算過的東西能不能留下來？留下來要付出什麼？留下來之後，能不能給別的請求用？</div>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-claims="C02">
+  <div class="kicker">基礎 · 沒有快取</div>
+  <h2>沒有快取：每生成一個 token，前面全部重算</h2>
+  <p class="lead">不快取時，每一步模型都以整個 prompt 加上已經生成的 tokens 當輸入，attention 需要的資料全部重算。</p>
+  <div class="nocheck" style="display:flex;flex-direction:column;gap:10px;min-height:0">
+    <div class="btns"><button id="dStep">生成下一個 token</button><button id="dReset">重來</button><span class="small muted">示意：假想的 4 個 token 的 prompt，每按一次生成 1 個新 token（非實測）</span></div>
+    <div class="demo-grid">
+      <div class="demo-col"><h3>沒有快取</h3><div id="dA" style="display:flex;flex-direction:column;gap:6px"></div><div class="tot" id="tA"></div></div>
+      <div class="demo-col"><h3>有快取</h3><div id="dB" style="display:flex;flex-direction:column;gap:6px"></div><div class="tot" id="tB"></div></div>
+    </div>
+    <div class="legend"><span class="l-new">這一步新算</span><span class="l-hit">從快取讀取</span></div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-claims="C01,C03">
+  <div class="kicker">基礎 · 有快取</div>
+  <h2>KV Cache：算過的 K、V 存起來，之後直接用</h2>
+  <div class="cols">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <p class="lead">KV Cache 的做法：每個 token 的 key（K）與 value（V）只算一次，之後重用。</p>
+      <p class="lead">先對整個輸入算好並存起來，之後每一步只計算新 token 的 K、V，附加到快取後面。</p>
+      <p class="small muted">（解說）attention 會讓每個新 token 去「查」前面所有 token 的資料，這些資料就是每個 token 的 K 與 V。</p>
+    </div>
+    <div class="card" style="justify-content:center;gap:16px">
+      <div class="tokens"><span class="tok hit">The</span><span class="tok hit">cat</span><span class="tok hit">sat</span><span class="tok hit">on</span><span class="tok new">the</span></div>
+      <div class="legend"><span class="l-hit">快取裡已有的 K、V</span><span class="l-new">這一步才新算的 K、V</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-claims="C03,C41">
+  <div class="kicker">基礎 · 兩個階段</div>
+  <h2>prefill 一次處理整個輸入；decode 一次一個 token</h2>
+  <div class="tl">
+    <div class="pre"><b>prefill</b><br>一次處理整個輸入，建立快取</div>
+    <div class="dec">decode<br>一個 token</div><div class="dec">decode<br>一個 token</div><div class="dec">decode<br>一個 token</div><div class="dec">decode<br>一個 token</div>
+  </div>
+  <div class="tokens"><span class="tok new">TTFT</span><span>使用者等到第一個字的時間，由 prefill 的延遲決定。</span></div>
+  <div class="cols">
+    <div class="card"><h3>prefill</h3><p class="small">先對輸入算好 attention 所需的 K、V 並存起來。（解說）輸入越長，這段等待越久。</p></div>
+    <div class="card"><h3>decode</h3><p class="small">之後每一步沿用快取，只算新 token 的 K、V，附加進去。</p></div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-claims="C04,C05">
+  <div class="kicker">基礎 · 為什麼可行</div>
+  <h2>為什麼快取不會改變答案？</h2>
+  <div class="cols">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <p class="lead">在因果（causal）語言模型中，位置 i 的 attention 只依賴它前面的 tokens，所以使用 KV Cache 不影響準確度。</p>
+      <p class="lead">同理，KV cache 只依賴前面的 tokens：只要前面的內容相同，就可以重用。</p>
+    </div>
+    <div class="card">
+      <h3>（解說）用一個畫面理解</h3>
+      <div class="tokens"><span class="tok hit">The</span><span class="tok hit">cat</span><span class="tok hit">sat</span><span class="tok new">on</span></div>
+      <p class="small muted">「on」的 K、V 只看它前面的 The cat sat。之後再接上 the、mat，也不會讓前面已算好的 K、V 改變。這是「跨請求重用」成立的根據。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-claims="C35">
+  <div class="kicker">基礎 · 省多少運算</div>
+  <h2>每一步的運算量，從跟序列長度的平方有關，降到線性</h2>
+  <div class="cols">
+    <div class="card"><h3>沒有快取</h3><div class="eq">≈ 6nd² + 4n²d</div></div>
+    <div class="card"><h3>有快取</h3><div class="eq">≈ 6d² + 4nd</div></div>
+  </div>
+  <p class="lead">n 是序列長度，d 是 hidden size。</p>
+  <p class="small muted">（解說）n 越大，兩者差距越大，所以輸入越長、生成越久，快取越划算。</p>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-claims="C33,C41">
+  <div class="kicker">基礎 · prefill 有多慢</div>
+  <h2>長輸入的 prefill 要等好幾秒</h2>
+  <p class="lead">輸入 4K tokens、單張 A40：Llama-34B 的 prefill 約 3 秒，Llama-70B 約 6 秒，使用者才會看到第一個字。</p>
+  <div class="tiles" style="grid-template-columns:repeat(2,1fr);max-width:42em">
+    <div class="tile"><div class="big">約 3 秒</div><div class="cap">Llama-34B · 4K tokens · 單張 A40</div></div>
+    <div class="tile"><div class="big">約 6 秒</div><div class="cap">Llama-70B · 4K tokens · 單張 A40</div></div>
+  </div>
+  <div class="hint">所以如果下一個請求的開頭跟這次一樣，把這段 prefill 的結果留下來，就能直接縮短 TTFT。這是後面「跨請求重用」的動機。</div>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-claims="C06,C07">
+  <div class="kicker">代價 · 記憶體</div>
+  <h2>快取不是免費的：它吃 GPU 記憶體</h2>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div class="small muted">13B 模型、40GB 的 A100</div>
+    <div class="bar"><div class="w" style="flex:0 0 65%">模型權重 約 65%</div><div class="k">KV cache 與其餘</div></div>
+    <div class="small muted">權重固定不變；KV cache 隨每個請求配置與釋放，怎麼管理它決定了最大 batch size。</div>
+  </div>
+  <table>
+    <tr><th>模型</th><th>每個 token 的 KV cache（16-bit）</th></tr>
+    <tr><td>Falcon 1B</td><td class="mono">0.18 MB</td></tr>
+    <tr><td>Llama 7B</td><td class="mono">0.50 MB</td></tr>
+    <tr><td>Llama 70B</td><td class="mono">2.5 MB</td></tr>
+  </table>
+  <p class="small muted">Llama 70B 快取一段 1K tokens 的內容，就要 2.5 GB。</p>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-claims="C08,C09,C40">
+  <div class="kicker">代價 · 怎麼管理記憶體</div>
+  <h2>PagedAttention：把作業系統的分頁搬來管 KV cache</h2>
+  <div class="cols">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <p class="lead">把每個請求的 KV cache 切成固定大小的 block，block 不必放在連續的空間。對照：block 像 page，token 像 byte，請求像 process。</p>
+      <p class="lead">做到接近零浪費；吞吐比 FasterTransformer、Orca 高 2–4×（同等延遲）。</p>
+      <p class="lead">block 還能被共享，跨同一請求的序列，甚至跨請求。</p>
+    </div>
+    <div class="card">
+      <h3>實體記憶體（不必連續）</h3>
+      <div class="mem"><div class="a">A</div><div class="o"></div><div class="a">B</div><div class="a">C</div><div class="o"></div><div class="o"></div><div class="a">D</div><div class="o"></div></div>
+      <p class="small muted">（示意）同一個請求的 block A–D 散在不同位置，由 block table 對應回邏輯順序。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-claims="C05,C29">
+  <div class="kicker">跨請求 · 開頭相同就重用</div>
+  <h2>prefix caching：不同請求共用開頭那一段</h2>
+  <div class="card" style="gap:12px">
+    <div class="tokens"><span class="mono small muted" style="width:4.5em">請求 A</span><span class="tok hit">系統提示 + 長文件（快取命中）</span><span class="tok new">問題 A</span></div>
+    <div class="tokens"><span class="mono small muted" style="width:4.5em">請求 B</span><span class="tok hit">系統提示 + 長文件（快取命中）</span><span class="tok new">問題 B</span></div>
+    <div class="tokens"><span class="mono small muted" style="width:4.5em">請求 C</span><span class="tok new">問題 C</span><span class="tok off">相同的長文件（在中間，不是 prefix）</span></div>
+  </div>
+  <p class="lead">相同 prompt prefix 的請求可以重用 KV cache。但只有「開頭」那一段能重用；相同內容出現在輸入中間，就不算。</p>
+  <div class="legend"><span class="l-hit">直接讀快取</span><span class="l-new">需要新算</span></div>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-claims="C10,C13,C14,C37">
+  <div class="kicker">跨請求 · 兩種實作</div>
+  <h2>怎麼知道哪些 KV 能重用？hash 鏈與 radix tree</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>vLLM：Automatic Prefix Caching</h3>
+      <p class="small">每個 block 的 hash 由「父 block 的 hash、這個 block 的 tokens、額外資訊」組成，所以一個 block 的 hash 代表從開頭到它的整段 prefix。</p>
+      <svg viewBox="0 0 380 70" role="img" aria-label="三個 block 串成 hash 鏈" width="100%">
+        <rect class="h" x="4" y="14" width="104" height="40" rx="8"/><text x="56" y="39" text-anchor="middle">hash(A)</text>
+        <rect class="h" x="138" y="14" width="104" height="40" rx="8"/><text x="190" y="39" text-anchor="middle">hash(A,B)</text>
+        <rect class="n" x="272" y="14" width="104" height="40" rx="8"/><text x="324" y="39" text-anchor="middle">hash(A,B,C)</text>
+        <path class="e" d="M108 34H138M242 34H272"/>
+      </svg>
+    </div>
+    <div class="card">
+      <h3>SGLang：RadixAttention</h3>
+      <p class="small">把 KV 留在 radix tree；用 LRU 淘汰最近最少使用的 leaf，每個節點有 reference counter。排程偏好共享最長 prefix 的請求。論文中 page 大小為 1 個 token。</p>
+      <svg viewBox="0 0 380 120" role="img" aria-label="radix tree 示意" width="100%">
+        <rect class="h" x="130" y="4" width="120" height="30" rx="8"/><text x="190" y="24" text-anchor="middle">系統提示</text>
+        <rect class="n" x="20" y="84" width="90" height="30" rx="8"/><text x="65" y="104" text-anchor="middle">問題 A</text>
+        <rect class="n" x="145" y="84" width="90" height="30" rx="8"/><text x="190" y="104" text-anchor="middle">問題 B</text>
+        <rect class="n" x="270" y="84" width="90" height="30" rx="8"/><text x="315" y="104" text-anchor="middle">續寫</text>
+        <path class="e" d="M190 34V60M65 60H315M65 60V84M190 60V84M315 60V84"/>
+      </svg>
+    </div>
+  </div>
+  <p class="small muted">兩者的粒度不同：這裡描述的是論文與文件的設計，不代表現行程式碼的所有細節。</p>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-claims="C15,C16,C17,C18">
+  <div class="kicker">跨請求 · 實測</div>
+  <h2>實測：最高省 6.4 倍吞吐，但不是每種情況都有用</h2>
+  <div class="tiles">
+    <div class="tile"><div class="big">最高 6.4×</div><div class="cap">吞吐提升（跨多種 workload）</div></div>
+    <div class="tile"><div class="big">最高 3.7×</div><div class="cap">延遲降低</div></div>
+    <div class="tile"><div class="big">50%–99%</div><div class="cap">各 benchmark 的 cache hit rate</div></div>
+    <div class="tile"><div class="big">&lt; 0.3%</div><div class="cap">沒有可重用 prefix 時的管理開銷</div></div>
+  </div>
+  <div class="cols">
+    <div class="card"><h3>真實部署（Chatbot Arena，一個月）</h3>
+      <div class="row"><span class="lab" style="width:7em">LLaVA-NeXT</span><div class="hbar" style="width:52.4%"></div><span class="mono">52.4%</span></div>
+      <div class="row"><span class="lab" style="width:7em">Vicuna</span><div class="hbar" style="width:74.1%"></div><span class="mono">74.1%</span></div>
+      <p class="small muted">cache hit rate</p></div>
+    <div class="callout"><h3>讀數字時要小心</h3><p class="small">6.4× 是「最高」，對照的是 Guidance、vLLM v0.2.5（舊版）與 LMQL。輸出很長的多輪對話幾乎沒有加速，因為 decode 時間主導。</p></div>
+  </div>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-claims="C29,C25">
+  <div class="kicker">進階 · prefix 不夠用</div>
+  <h2>RAG 的難題：要重用的內容不在開頭</h2>
+  <div class="card" style="gap:12px">
+    <div class="tokens"><span class="tok hit">系統提示（開頭，可重用）</span><span class="tok off">文件 X</span><span class="tok off">文件 Y</span><span class="tok new">問題</span></div>
+    <div class="legend"><span class="l-hit">prefix，可直接重用</span><span class="l-new">新算</span></div>
+  </div>
+  <div class="cols">
+    <div class="card"><h3>位置的問題</h3><p class="small">RAG 把多個檢索到的 chunk 放進輸入，只有第一個 chunk 是 prefix，其他的無法重用。位置編碼又讓 attention states 與位置有關。</p></div>
+    <div class="card"><h3>品質的問題</h3><p class="small">直接重用各 chunk 預先算好的 KV（full KV reuse）速度快，卻忽略 chunk 之間的 cross-attention，可能答錯。</p></div>
+  </div>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-claims="C25,C28,C27,C26">
+  <div class="kicker">進階 · 做法 A</div>
+  <h2>Prompt Cache：把常用文字段做成可重用的模組</h2>
+  <div class="cols">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <p class="lead">用 schema（PML）定義 prompt modules，預先算好 attention states 存起來；論文觀察到 LLM 能處理不連續的 position IDs。</p>
+      <p class="lead">各 module 獨立編碼，跨 module 的 attention 被遮蔽：module 語意獨立時可能無害，彼此相依時品質可能變差。</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="tiles" style="grid-template-columns:1fr 1fr">
+        <div class="tile"><div class="big">1.5–10×</div><div class="cap">GPU 上的 TTFT 改善</div></div>
+        <div class="tile"><div class="big">20–70×</div><div class="cap">CPU 上的 TTFT 改善</div></div>
+      </div>
+      <p class="small muted">論文摘要寫的是 GPU 最高 8×、CPU 最高 60×；內文詳細範圍較大，兩者並列時要說明脈絡。</p>
+      <div class="callout"><p class="small">只降 TTFT，不降每個 token 的生成時間：RTX 4090、Llama 7B、3K context，TTFT 從 900 ms 降到 90 ms，每個 token 仍約 32 ms。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-claims="C30,C31,C34">
+  <div class="kicker">進階 · 做法 B</div>
+  <h2>CacheBlend：重用之後，只重算一小部分</h2>
+  <p class="lead">重用預先算好的 KV cache，再「選擇性重算」少數影響最大（KV deviation 高）的 token；預設約 15%，重算與載入下一層 KV 同時進行，所以不增加延遲。</p>
+  <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
+    <div class="tile"><div class="big">2.2–3.3×</div><div class="cap">TTFT 降低（對照 full KV recompute）</div></div>
+    <div class="tile"><div class="big">2.8–5×</div><div class="cap">吞吐提升（對照 full KV recompute）</div></div>
+    <div class="tile"><div class="big">3.3×</div><div class="cap">同樣 TTFT 下，吞吐最多比 prefix caching 高</div></div>
+  </div>
+  <div class="cols">
+    <div class="card"><h3>品質</h3><p class="small">品質下降不超過 0.01–0.03。</p></div>
+    <div class="callout"><h3>限制</h3><p class="small">論文的觀察不一定適用 Mamba 等非 transformer 架構。</p></div>
+  </div>
+</section>
+
+<!-- 18 -->
+<section class="slide" data-claims="C28,C39,C29">
+  <div class="kicker">進階 · 來源之間不一致</div>
+  <h2>「非 prefix 重用」的品質：三篇論文怎麼說</h2>
+  <table>
+    <tr><th>誰說的</th><th>說了什麼</th></tr>
+    <tr><td>Prompt Cache 論文</td><td>各 module 獨立編碼；語意獨立時可能降低雜訊，相依時品質可能變差。</td></tr>
+    <tr><td>SGLang 論文（轉述）</td><td>PromptCache 準確度最高可能掉 43%。</td></tr>
+    <tr><td>CacheBlend 論文</td><td>full KV reuse 忽略 chunk 之間的 cross-attention，品質會下降。</td></tr>
+  </table>
+  <div class="callout"><b>結論：</b>三者的模型、任務與設定都不同，沒有一個數字能當通則。這是建 Wiki 時被記進衝突紀錄、而沒有被抹平的例子。</div>
+</section>
+
+<!-- 19 -->
+<section class="slide" data-claims="C19,C20,C21,C22,C23,C24">
+  <div class="kicker">實務 · API 的 prompt caching</div>
+  <h2>在 API 裡用快取：怎麼命中、怎麼算錢</h2>
+  <div class="cols">
+    <ul class="list" style="font-size:.86em">
+      <li>快取到 <code>cache_control</code> 指定位置為止的完整 prefix，順序是 tools → system → messages。</li>
+      <li>預設壽命 5 分鐘，命中就免費刷新；可選 1 小時。</li>
+      <li>價格：5 分鐘寫入 1.25×、1 小時寫入 2×、讀取一般 0.1×（部分模型更低）。</li>
+      <li>最小可快取長度依模型而異，512 到 4,096 tokens；太短就不快取，也不會報錯。</li>
+      <li>prefix 必須 100% 相同；最多 4 個明確 breakpoint；快取不影響輸出。</li>
+    </ul>
+    <div class="card"><h3>檢查清單（解說）</h3>
+      <ul class="list small">
+        <li>不變的內容放最前面：tool 定義、系統指示、長文件。</li>
+        <li>會變的內容（時間戳、使用者問題）放最後；breakpoint 放在最後一個穩定的區塊。</li>
+        <li>看回應的 usage 欄位確認有沒有命中，不要假設。</li>
+        <li>請求間隔可能超過 5 分鐘時，評估 1 小時壽命。</li>
+      </ul>
+      <p class="small muted nocheck">價格與限制會變，以官方文件為準（取得日 2026-11-15）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 20 -->
+<section class="slide" data-claims="C01,C08,C05,C25,C19,C36">
+  <div class="kicker">整理 · 名詞對照</div>
+  <h2>最容易搞混的名詞</h2>
+  <table>
+    <tr><th>名詞</th><th>它是什麼</th></tr>
+    <tr><td>KV cache</td><td>單一請求生成過程中，存起來重用的每個 token 的 K、V</td></tr>
+    <tr><td>PagedAttention</td><td>KV cache 的記憶體排法（切成 block，不必連續）</td></tr>
+    <tr><td>prefix caching</td><td>跨請求重用「開頭相同」的 KV</td></tr>
+    <tr><td>Prompt Cache（大寫）</td><td>論文提出的系統：以 schema 做非 prefix 的模組化重用</td></tr>
+    <tr><td>prompt caching（小寫）</td><td>商用 API 的功能：快取 prefix，以 <code>cache_control</code> 控制</td></tr>
+  </table>
+  <p class="small muted">後兩者只差大小寫，卻是兩個東西。這是 Wiki 對兩份來源的整理，不是任一來源的原文。</p>
+</section>
+
+<!-- 21 -->
+<section class="slide" data-claims="none">
+  <div class="kicker">整理 · 自我檢查</div>
+  <h2>學完了嗎？點開看答案</h2>
+  <div>
+    <details><summary>為什麼使用 KV cache 不會改變模型的答案？</summary><p>因果語言模型中，每個位置的 attention 只依賴它前面的 tokens，前面的 K、V 不會因後面新增的 token 而改變。</p></details>
+    <details><summary>KV cache 的代價是什麼？</summary><p>GPU 記憶體。每個 token 都要存 K、V，所以長 context 與大量併發請求會吃掉很多記憶體，要靠 PagedAttention 這類方式管理。</p></details>
+    <details><summary>prefix caching 為什麼只能重用「開頭」？</summary><p>KV 取決於前面的內容；只有開頭相同，後面每個 token 的 K、V 才會一樣。內容出現在中間時，它前面的內容不同，K、V 就不能直接沿用，需要 Prompt Cache、CacheBlend 這類方法。</p></details>
+    <details><summary>Prompt Cache 和 prompt caching 差在哪？</summary><p>前者是論文提出的非 prefix 重用系統，後者是商用 API 的 prefix 快取功能。</p></details>
+  </div>
+</section>
+
+<!-- 22 -->
+<section class="slide" data-claims="none">
+  <div class="kicker">附錄 · 資料來源</div>
+  <h2>資料來源（全部都在 Wiki 的來源頁有紀錄）</h2>
+  <ol class="list nocheck" style="font-size:.78em">
+    <li>Kwon et al. <i>Efficient Memory Management for LLM Serving with PagedAttention</i>, SOSP 2023.</li>
+    <li>Zheng et al. <i>SGLang: Efficient Execution of Structured Language Model Programs</i>, NeurIPS 2024.</li>
+    <li>Gim et al. <i>Prompt Cache: Modular Attention Reuse for Low-Latency Inference</i>, MLSys 2024.</li>
+    <li>Yao et al. <i>CacheBlend: Fast LLM Serving for RAG with Cached Knowledge Fusion</i>, EuroSys 2025.</li>
+    <li>Anthropic. <i>Prompt caching</i>, Claude Platform Docs（取得日 2026-11-15）.</li>
+    <li>vLLM. <i>Automatic Prefix Caching</i>, design doc（只用於 hash 鏈的概念）.</li>
+  </ol>
+  <p class="small muted" id="wikiLink">每一頁底部的 claim 編號，對應 Wiki 的主張帳本。</p>
+</section>
+
+</div></div></div>
+<div id="nav"><button id="prev" aria-label="上一頁">← 上一頁</button><span id="count"></span><button id="next" aria-label="下一頁">下一頁 →</button></div>
+</div>
+
+<script>
+(function(){
+  var WIKI = "index.html";
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage'), fit = document.getElementById('fit');
+  var mobileMQ = window.matchMedia('(max-width:760px)');
+  var idx = 0;
+
+  // footer: which Wiki claims this slide depends on
+  slides.forEach(function(s){
+    var c = s.getAttribute('data-claims');
+    if(!c || c === 'none') return;
+    var f = document.createElement('footer'); f.className = 'src nocheck';
+    f.appendChild(document.createTextNode('依據 Wiki：'));
+    c.split(',').forEach(function(id){
+      id = id.trim();
+      var el;
+      if(WIKI.indexOf('http') === 0){ el = document.createElement('a'); el.href = WIKI + '#' + id; el.target = '_blank'; el.rel = 'noopener'; }
+      else { el = document.createElement('span'); }
+      el.textContent = id; f.appendChild(el);
+    });
+    s.appendChild(f);
+  });
+  if(WIKI.indexOf('http') === 0){
+    var wl = document.getElementById('wikiLink');
+    if(wl){ wl.innerHTML = ''; wl.appendChild(document.createTextNode('每一頁底部的 claim 編號，對應 Wiki 的主張帳本：')); var a = document.createElement('a'); a.href = WIKI; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '開啟 KV Cache Wiki'; wl.appendChild(a); }
+  }
+
+  function layout(){
+    if(mobileMQ.matches){ fit.style.width = fit.style.height = ''; stage.style.transform = ''; return; }
+    var vp = document.getElementById('viewport');
+    var aw = vp.clientWidth, ah = vp.clientHeight - 8;
+    var s = Math.min(aw/1280, ah/720);
+    fit.style.width = (1280*s) + 'px'; fit.style.height = (720*s) + 'px';
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  function show(i, fromHash){
+    idx = Math.max(0, Math.min(slides.length-1, i));
+    slides.forEach(function(s,k){ s.classList.toggle('on', k === idx); });
+    document.getElementById('count').textContent = (idx+1) + ' / ' + slides.length;
+    document.querySelector('#bar i').style.width = ((idx+1)/slides.length*100) + '%';
+    if(!fromHash){ try{ history.replaceState(null,'','#p'+(idx+1)); }catch(e){} }
+  }
+  function fromHash(){ var m = /^#p(\d+)$/.exec(location.hash); if(m) show(parseInt(m[1],10)-1, true); }
+  document.getElementById('prev').onclick = function(){ show(idx-1); };
+  document.getElementById('next').onclick = function(){ show(idx+1); };
+  document.addEventListener('keydown', function(e){
+    if(e.target && /^(INPUT|TEXTAREA|SUMMARY)$/.test(e.target.tagName)) return;
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){ e.preventDefault(); show(idx+1); }
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){ e.preventDefault(); show(idx-1); }
+    else if(e.key==='Home'){ show(0); } else if(e.key==='End'){ show(slides.length-1); }
+  });
+  window.addEventListener('resize', layout);
+  window.addEventListener('hashchange', fromHash);
+
+  // demo: with / without KV cache (illustrative, not measured)
+  var seq = ['The','cat','sat','on','the','mat','.','<end>'], P = 4, K = 0;
+  var dA = document.getElementById('dA'), dB = document.getElementById('dB'), tA = document.getElementById('tA'), tB = document.getElementById('tB');
+  function tok(t, cls){ var s = document.createElement('span'); s.className = 'tok ' + cls; s.textContent = t; return s; }
+  function row(parent, k, tokens, kinds){
+    var r = document.createElement('div'); r.className = 'row';
+    var l = document.createElement('span'); l.className = 'lab'; l.textContent = 'step ' + k; r.appendChild(l);
+    var w = document.createElement('div'); w.className = 'tokens';
+    tokens.forEach(function(t,i){ w.appendChild(tok(t, kinds[i])); }); r.appendChild(w); parent.appendChild(r);
+  }
+  var totA = 0, totB = 0;
+  function demoStep(){
+    if(K > 4) return;
+    var ctx = seq.slice(0, P + K);
+    row(dA, K, ctx, ctx.map(function(){ return 'new'; })); totA += ctx.length;
+    row(dB, K, ctx, ctx.map(function(_,i){ return (K === 0 || i === ctx.length-1) ? 'new' : 'hit'; })); totB += (K === 0 ? ctx.length : 1);
+    tA.textContent = '累計重算 ' + totA + ' 個 token'; tB.textContent = '累計新算 ' + totB + ' 個 token';
+    K++;
+  }
+  function demoReset(){ dA.innerHTML = dB.innerHTML = ''; tA.textContent = tB.textContent = ''; K = totA = totB = 0; demoStep(); }
+  document.getElementById('dStep').onclick = demoStep;
+  document.getElementById('dReset').onclick = demoReset;
+  demoReset();
+
+  layout(); show(0, true); fromHash();
+  if(window.ResizeObserver){ new ResizeObserver(layout).observe(document.getElementById('viewport')); }
+  if(document.fonts && document.fonts.ready){ document.fonts.ready.then(layout); }
+})();
+</script>
