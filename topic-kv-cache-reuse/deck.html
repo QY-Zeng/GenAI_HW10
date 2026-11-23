@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KV Cache Reuse：從單模型前綴快取到多代理與跨模型重用</title>
+<style>
+  :root {
+    --bg-outer: #0f172a;
+    --bg-slide: #f8fafc;
+    --card-bg: #ffffff;
+    --ink: #0f172a;
+    --ink-muted: #475569;
+    --border: #e2e8f0;
+    --navy: #1e293b;
+    --blue: #2563eb;
+    --blue-soft: #eff6ff;
+    --teal: #0d9488;
+    --teal-soft: #f0fdfa;
+    --indigo: #4f46e5;
+    --indigo-soft: #eef2ff;
+    --amber: #d97706;
+    --amber-soft: #fffbeb;
+    --rose: #e11d48;
+    --rose-soft: #fff1f2;
+    --emerald: #059669;
+    --emerald-soft: #ecfdf5;
+    --font-sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-outer);
+    font-family: var(--font-sans);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage-wrap {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .deck {
+    width: 1280px;
+    height: 720px;
+    position: relative;
+    transform-origin: center center;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--bg-slide);
+  }
+
+  .progress-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 5px;
+    background: linear-gradient(90deg, var(--blue), var(--teal), var(--indigo));
+    transition: width 0.25s ease;
+    z-index: 20;
+  }
+
+  section.slide {
+    position: absolute;
+    inset: 0;
+    width: 1280px;
+    height: 720px;
+    padding: 36px 48px 54px 48px;
+    display: none;
+    flex-direction: column;
+    background: var(--bg-slide);
+    overflow: hidden;
+  }
+
+  section.slide.active {
+    display: flex;
+  }
+
+  /* Cover slide styling */
+  section.slide.cover {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 58%, #0f766e 100%);
+    color: #f8fafc;
+    justify-content: space-between;
+    padding: 46px 56px 56px 56px;
+  }
+
+  .cover .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    width: fit-content;
+  }
+
+  .cover h1 {
+    font-size: 46px;
+    line-height: 1.22;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-top: 14px;
+  }
+
+  .cover .subtitle {
+    font-size: 20px;
+    color: #cbd5e1;
+    margin-top: 10px;
+    line-height: 1.45;
+  }
+
+  .cover .hook-box {
+    margin-top: 18px;
+    background: rgba(15, 23, 42, 0.42);
+    border-left: 4px solid #38bdf8;
+    padding: 14px 20px;
+    border-radius: 10px;
+    font-size: 17px;
+    line-height: 1.5;
+    color: #e2e8f0;
+  }
+
+  .milestone-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-top: 18px;
+  }
+
+  .milestone-pill {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 12px;
+    padding: 12px 13px;
+  }
+
+  .milestone-pill .num {
+    font-size: 12px;
+    font-weight: 700;
+    color: #7dd3fc;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  .milestone-pill .name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 3px 0 4px 0;
+  }
+
+  .milestone-pill .desc {
+    font-size: 13px;
+    color: #cbd5e1;
+    line-height: 1.35;
+  }
+
+  /* Standard slide header */
+  .slide-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 11px;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+  }
+
+  .slide-header .title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    width: fit-content;
+    letter-spacing: 0.4px;
+  }
+  .tag.blue { background: var(--blue-soft); color: var(--blue); }
+  .tag.teal { background: var(--teal-soft); color: var(--teal); }
+  .tag.indigo { background: var(--indigo-soft); color: var(--indigo); }
+  .tag.amber { background: var(--amber-soft); color: var(--amber); }
+  .tag.rose { background: var(--rose-soft); color: var(--rose); }
+  .tag.emerald { background: var(--emerald-soft); color: var(--emerald); }
+
+  h2 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+
+  .page-badge {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink-muted);
+    background: #e2e8f0;
+    padding: 5px 11px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Body layouts */
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; min-height: 0; }
+  .grid-2-wide { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 16px; flex: 1; min-height: 0; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; flex: 1; min-height: 0; }
+  .grid-2x2 { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; flex: 1; min-height: 0; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 15px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+    min-height: 0;
+  }
+
+  .card.accent-blue { border-top: 4px solid var(--blue); }
+  .card.accent-teal { border-top: 4px solid var(--teal); }
+  .card.accent-indigo { border-top: 4px solid var(--indigo); }
+  .card.accent-amber { border-top: 4px solid var(--amber); }
+  .card.accent-rose { border-top: 4px solid var(--rose); }
+  .card.accent-emerald { border-top: 4px solid var(--emerald); }
+
+  .card h3 {
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .card p, .card li {
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: #334155;
+  }
+
+  .card ul, .card ol {
+    padding-left: 19px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .kpi-row.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+  .kpi {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 14px;
+    text-align: center;
+  }
+
+  .kpi .val {
+    font-size: 23px;
+    font-weight: 800;
+    color: var(--blue);
+    line-height: 1.15;
+  }
+  .kpi.teal .val { color: var(--teal); }
+  .kpi.indigo .val { color: var(--indigo); }
+  .kpi.amber .val { color: var(--amber); }
+  .kpi.rose .val { color: var(--rose); }
+  .kpi.emerald .val { color: var(--emerald); }
+
+  .kpi .lbl {
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    margin-top: 3px;
+    line-height: 1.3;
+  }
+
+  .callout {
+    background: var(--blue-soft);
+    border-left: 4px solid var(--blue);
+    border-radius: 8px;
+    padding: 11px 15px;
+    font-size: 14px;
+    line-height: 1.48;
+    color: #1e3a8a;
+  }
+  .callout.amber { background: var(--amber-soft); border-left-color: var(--amber); color: #78350f; }
+  .callout.rose { background: var(--rose-soft); border-left-color: var(--rose); color: #881337; }
+  .callout.emerald { background: var(--emerald-soft); border-left-color: var(--emerald); color: #064e3b; }
+
+  .formula {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    text-align: center;
+  }
+
+  /* Compact decision table */
+  table.clean-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.8px;
+    background: var(--card-bg);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  table.clean-table th {
+    background: var(--navy);
+    color: #f8fafc;
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 700;
+  }
+  table.clean-table td {
+    padding: 9px 12px;
+    border-top: 1px solid var(--border);
+    color: #334155;
+    line-height: 1.4;
+    vertical-align: top;
+  }
+  table.clean-table tr:nth-child(even) td { background: #f8fafc; }
+
+  /* Source footer */
+  footer.slide-source {
+    position: absolute;
+    left: 48px;
+    right: 48px;
+    bottom: 14px;
+    font-size: 11.5px;
+    color: #64748b;
+    border-top: 1px solid var(--border);
+    padding-top: 7px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  section.slide.cover footer.slide-source {
+    color: #cbd5e1;
+    border-top-color: rgba(255,255,255,0.22);
+    left: 56px;
+    right: 56px;
+  }
+
+  /* Floating nav controls */
+  .controls {
+    position: fixed;
+    bottom: 14px;
+    right: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.16);
+    color: #f8fafc;
+    font-size: 13px;
+    z-index: 50;
+  }
+
+  .controls button {
+    background: rgba(255,255,255,0.12);
+    color: #f8fafc;
+    border: none;
+    border-radius: 999px;
+    padding: 5px 11px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.15s;
+  }
+  .controls button:hover { background: rgba(255,255,255,0.26); }
+  .slide-counter { font-family: var(--font-mono); padding: 0 6px; font-weight: 700; }
+
+  /* Grid overview modal */
+  .overview-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.94);
+    z-index: 80;
+    display: none;
+    flex-direction: column;
+    padding: 28px 36px;
+    overflow-y: auto;
+  }
+  .overview-overlay.open { display: flex; }
+  .overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #f8fafc;
+    margin-bottom: 18px;
+  }
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .overview-item {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 14px;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .overview-item:hover { border-color: #38bdf8; transform: translateY(-2px); }
+  .overview-item.current { border-color: #38bdf8; background: #0f2942; }
+  .overview-item .ov-num { font-family: var(--font-mono); font-size: 12px; color: #38bdf8; font-weight: 700; }
+  .overview-item .ov-title { font-size: 14px; font-weight: 700; margin-top: 4px; line-height: 1.35; }
+
+  /* Print mode */
+  @media print {
+    html, body { overflow: visible; background: #fff; }
+    .controls, .overview-overlay, .progress-bar { display: none !important; }
+    .stage-wrap { display: block; width: auto; height: auto; }
+    .deck { width: auto; height: auto; transform: none !important; box-shadow: none; overflow: visible; }
+    section.slide {
+      position: relative;
+      display: flex !important;
+      page-break-after: always;
+      break-after: page;
+      margin: 0 auto 12px auto;
+      border: 1px solid #cbd5e1;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage-wrap">
+  <div class="deck" id="deck">
+    <div class="progress-bar" id="progressBar"></div>
+
+    <!-- SLIDE 01 -->
+    <section class="slide cover active" data-title="KV Cache Reuse：打破 LLM 重複閱讀的算力枷鎖">
+      <div>
+        <div class="eyebrow">KV Cache Reuse 教學簡報｜完全源自已驗證 LLM Wiki</div>
+        <h1>KV Cache Reuse：<br>從單模型前綴快取到多代理與跨模型重用</h1>
+        <p class="subtitle">五篇代表性論文的技術演進、系統實戰與跨文獻張力導讀</p>
+        <div class="hook-box">
+          <strong>核心問題：</strong>在 RAG、多代理協作與多模型路由中，同一段長上下文為何每換一次位置或模型，就得重算一次昂貴的 Prefill？
+        </div>
+      </div>
+
+      <div class="milestone-strip">
+        <div class="milestone-pill">
+          <div class="num">01 · EuroSys '25</div>
+          <div class="name">CacheBlend</div>
+          <div class="desc">打破「嚴格前綴」限制，實現 RAG 多區塊融合</div>
+        </div>
+        <div class="milestone-pill">
+          <div class="num">02 · 2025</div>
+          <div class="name">LMCache</div>
+          <div class="desc">打破「單張 GPU 記憶體」限制，建立分散式快取層</div>
+        </div>
+        <div class="milestone-pill">
+          <div class="num">03 · 2026</div>
+          <div class="name">RelayCaching</div>
+          <div class="desc">打破「靜態預計算」限制，加速多代理動態接力</div>
+        </div>
+        <div class="milestone-pill">
+          <div class="num">04 · 2024 / NSDI '26</div>
+          <div class="name">DroidSpeak</div>
+          <div class="desc">打破「單一權重」限制，跨微調模型共享快取</div>
+        </div>
+        <div class="milestone-pill">
+          <div class="num">05 · 2026</div>
+          <div class="name">Cross-Model KV</div>
+          <div class="desc">打破「相同模型尺寸」限制，閉式線性映射轉移</div>
+        </div>
+      </div>
+
+      <footer class="slide-source">
+        <span>出處：wiki/overview.md｜[CacheBlend, §4–7; DroidSpeak, §3–5; LMCache, §5–8; RelayCaching, §3–5; Cross-Model KV, §2–4]</span>
+        <span>01 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 02 -->
+    <section class="slide" data-title="為什麼 Prefill 是推理系統的頭號瓶頸？">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag blue">背景與痛點</span>
+          <h2>為什麼 Prefill 是推理系統的頭號瓶頸？</h2>
+        </div>
+        <span class="page-badge">02 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card accent-rose">
+            <h3>Prefill（預填充階段）— 計算密集瓶頸</h3>
+            <ul>
+              <li>一次處理完整輸入上下文，計算複雜度隨序列長度呈<strong>二次成長</strong>。</li>
+              <li>以 4K tokens 為例，在單張 A40 GPU 上即需 <strong>3–6 秒</strong>（Llama-34B／70B）<code>[CacheBlend, §2, p.3]</code>。</li>
+              <li><strong>Prefill 干擾（Prefill Interference）</strong>：長 Prefill 不只直接拉高 <strong>TTFT</strong>，還會搶佔排程波及正在 Decode 的請求，拖累 <strong>TBT／ITL</strong> 與 <strong>E2E</strong>，壓低滿足 SLO 的有效吞吐 <strong>Goodput</strong> <code>[DroidSpeak, §2.1, §2.3, Fig. 5, p.3–4]</code>。</li>
+            </ul>
+          </div>
+          <div class="card accent-teal">
+            <h3>Decode（解碼階段）與傳統 Prefix Caching 枷鎖</h3>
+            <ul>
+              <li><strong>Decode 階段</strong>：利用 KV Cache 逐 token 生成，屬<strong>記憶體頻寬受限</strong>且複雜度僅呈線性成長 <code>[DroidSpeak, §2.1, Fig. 3, p.2–3]</code>。</li>
+              <li>傳統推理引擎（vLLM／SGLang）的 <strong>Prefix Caching</strong> 雖免重算前綴，但受限於<strong>三重枷鎖</strong>：</li>
+            </ul>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px;">
+              <div class="kpi rose" style="padding:10px 8px;"><div class="val" style="font-size:16px;">🔒 同一模型</div><div class="lbl">換微調或尺寸即失效</div></div>
+              <div class="kpi amber" style="padding:10px 8px;"><div class="val" style="font-size:16px;">🔒 同一 GPU</div><div class="lbl">HBM 滿了只能驅逐</div></div>
+              <div class="kpi indigo" style="padding:10px 8px;"><div class="val" style="font-size:16px;">🔒 嚴格前綴</div><div class="lbl">非前綴拼接即 miss</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>問題核心：</strong>只要實際應用涉及多區塊拼接（RAG）、跨機卸載、多代理接力或多模型路由，傳統 Prefix Caching 就會失效並退回昂貴的全量 Prefill <code>[CacheBlend, §3.2, p.3; LMCache, §1, p.1]</code>。
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/entities/llm-serving-metrics.md、wiki/papers/cacheblend.md、wiki/papers/lmcache.md、wiki/entities/vllm-and-sglang.md、wiki/overview.md｜[CacheBlend, §2, §3.2; DroidSpeak, §2.1–2.3; LMCache, §1]</span>
+        <span>02 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 03 -->
+    <section class="slide" data-title="五篇論文如何突圍？三軸演進全景圖">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag indigo">全景地圖</span>
+          <h2>五篇論文如何突圍？三軸演進全景圖</h2>
+        </div>
+        <span class="page-badge">03 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-3">
+          <div class="card accent-teal">
+            <span class="tag teal">軸一｜空間與系統軸</span>
+            <h3>GPU 存不下、跨機怎麼搬？</h3>
+            <p><strong>LMCache（2025）</strong></p>
+            <ul>
+              <li>Chunk 批次搬運（<strong>400 Gbps</strong>）、計算–I/O 管線化與標準化 API。</li>
+              <li>打通 CPU／SSD／遠端儲存與 PD 分離。</li>
+              <li>跨情境最高提升 <strong>15×</strong> 吞吐量 <code>[LMCache, Abstract, §5–8, Table 5, p.1, 6–14]</code>。</li>
+            </ul>
+          </div>
+          <div class="card accent-blue">
+            <span class="tag blue">軸二｜語境與位置軸</span>
+            <h3>前綴變了怎麼辦？</h3>
+            <p><strong>CacheBlend（EuroSys '25）</strong></p>
+            <ul>
+              <li>RAG 靜態多區塊非前綴融合，重算 <strong>5–18%</strong> HKVD tokens，TTFT 降 <strong>2.2–3.3×</strong> <code>[CacheBlend, §4.3, §7.2–7.3, p.6–7, 12]</code>。</li>
+            </ul>
+            <p style="margin-top:4px;"><strong>RelayCaching（2026）</strong></p>
+            <ul>
+              <li>多代理動態 Decode-to-Prefill 接力，U 型中層＋稀疏修正，重用 <strong>&gt;80%</strong>、12K 長文快 <strong>9.2×</strong> <code>[RelayCaching, §4–5, Table 1–2, Fig. 8, p.4–8]</code>。</li>
+            </ul>
+          </div>
+          <div class="card accent-indigo">
+            <span class="tag indigo">軸三｜模型邊界軸</span>
+            <h3>換了模型還能重用嗎？</h3>
+            <p><strong>DroidSpeak（2024／NSDI '26）</strong></p>
+            <ul>
+              <li>同底模同架構微調變體，單一切換點連續層重算，Prefill 降 <strong>1.7–2.6×</strong> <code>[DroidSpeak, §4.1–4.2, §5.2, p.6–7, 10]</code>。</li>
+            </ul>
+            <p style="margin-top:4px;"><strong>Cross-Model KV Transfer（2026）</strong></p>
+            <ul>
+              <li>同家族跨尺寸 matched-KV 閉式線性映射，Tier 1 保留 <strong>73–98%</strong> 精度、快 <strong>2.7–25×</strong> <code>[Cross-Model KV, §3–4, Table 1, 5, p.4–9]</code>。</li>
+            </ul>
+          </div>
+        </div>
+        <svg viewBox="0 0 1180 78" width="100%" height="78" style="flex-shrink:0;">
+          <rect x="0" y="6" width="1180" height="66" rx="10" fill="#ffffff" stroke="#e2e8f0" />
+          <line x1="65" y1="39" x2="1115" y2="39" stroke="#cbd5e1" stroke-width="3" stroke-dasharray="6 5" />
+          <circle cx="110" cy="39" r="9" fill="#64748b" /><text x="110" y="63" text-anchor="middle" font-size="12" fill="#475569" font-weight="700">Prefix Caching 基線</text>
+          <circle cx="330" cy="39" r="10" fill="#2563eb" /><text x="330" y="63" text-anchor="middle" font-size="12" fill="#1e3a8a" font-weight="700">CacheBlend（非前綴 RAG）</text>
+          <circle cx="555" cy="39" r="10" fill="#0d9488" /><text x="555" y="63" text-anchor="middle" font-size="12" fill="#115e59" font-weight="700">LMCache（分散式卸載）</text>
+          <circle cx="785" cy="39" r="10" fill="#d97706" /><text x="785" y="63" text-anchor="middle" font-size="12" fill="#92400e" font-weight="700">RelayCaching（多代理接力）</text>
+          <circle cx="1025" cy="39" r="10" fill="#4f46e5" /><text x="1025" y="63" text-anchor="middle" font-size="12" fill="#312e81" font-weight="700">DroidSpeak → Cross-Model KV</text>
+        </svg>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/syntheses/kv-reuse-landscape.md、wiki/overview.md｜[5 篇綜合對照]</span>
+        <span>03 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 04 -->
+    <section class="slide" data-title="CacheBlend：RAG 多區塊融合與 HKVD 選擇性重算">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag blue">里程碑 1 · EuroSys '25</span>
+          <h2>CacheBlend：RAG 多區塊融合與 HKVD 選擇性重算</h2>
+        </div>
+        <span class="page-badge">04 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2-wide">
+          <div class="card accent-blue">
+            <h3>三大關鍵設計：速度媲美全重用、品質對齊全重算</h3>
+            <ol>
+              <li><strong>HKVD 選擇性重算＋漸進過濾</strong>：受惠於注意力稀疏性，僅需重算每層約 <strong>10–15%</strong>（實測 <strong>5%–18%</strong>，系統保底 <strong>15%</strong>）高偏差 tokens，首層全算後逐層過濾 <code>[CacheBlend, §4.3, §5.1, §7.3, Fig. 6–9, p.6–8, 12]</code>。</li>
+              <li><strong>RoPE 單次旋轉校正</strong>：利用相對距離不變性，一次性乘法對齊非前綴位置 <code>[CacheBlend, Footnote 3, p.6; Appendix A, p.16]</code>。</li>
+              <li><strong>計算–載入逐層管線化</strong>：重疊第 <em>i</em> 層重算與第 <em>i</em>+1 層 SSD／RAM 載入，讓重算延遲被載入時間隱藏 <code>[CacheBlend, §5.1, §6, Fig. 10–11, p.8–9]</code>。</li>
+            </ol>
+          </div>
+          <div class="card accent-rose">
+            <h3>直覺案例：為何 Full KV Reuse 會答錯？</h3>
+            <p>獨立預計算 Chunk 1「<strong>Messi 進 13 球</strong>」與 Chunk 2「<strong>Ronaldo 進 8 球</strong>」並直接拼接，即便修好位置編碼，仍完全缺失跨區塊 <strong>cross-attention</strong>，導致模型胡言亂語 <code>[CacheBlend, §3.3, Fig. 3–4, p.4–5]</code>。</p>
+            <svg viewBox="0 0 430 140" width="100%" height="140" style="margin-top:4px;">
+              <rect x="8" y="10" width="128" height="44" rx="8" fill="#dbeafe" stroke="#2563eb" />
+              <text x="72" y="37" text-anchor="middle" font-size="13" font-weight="700" fill="#1e3a8a">Chunk 1: Messi 13 球</text>
+              <rect x="152" y="10" width="144" height="44" rx="8" fill="#fce7f3" stroke="#db2777" />
+              <text x="224" y="37" text-anchor="middle" font-size="13" font-weight="700" fill="#831843">Chunk 2: Ronaldo 8 球</text>
+              <rect x="312" y="10" width="110" height="44" rx="8" fill="#f1f5f9" stroke="#64748b" />
+              <text x="367" y="37" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">Query: 誰多？</text>
+              <path d="M136 32 L152 32" stroke="#e11d48" stroke-width="3" stroke-dasharray="4 3" />
+              <text x="144" y="25" text-anchor="middle" font-size="13" font-weight="800" fill="#e11d48">✕</text>
+              <rect x="8" y="76" width="414" height="54" rx="8" fill="#ecfdf5" stroke="#059669" />
+              <text x="215" y="99" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">CacheBlend：只重算 5%–18% HKVD tokens</text>
+              <text x="215" y="119" text-anchor="middle" font-size="12.5" fill="#047857">補回跨區塊 cross-attention ＋ 隱藏重算於 SSD/RAM 載入管線</text>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi"><div class="val">2.2–3.3×</div><div class="lbl">TTFT 延遲縮減（vs Full / Prefix）</div></div>
+          <div class="kpi emerald"><div class="val">2.8–5×</div><div class="lbl">吞吐提升（較 Prefix Caching 高 3.3×）</div></div>
+          <div class="kpi indigo"><div class="val">≤ 0.02</div><div class="lbl">F1 / Rouge-L 損失（Yi-34B 僅 ≤ 0.002）</div></div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/cacheblend.md｜[CacheBlend, §3.3–7.3, Fig. 3, 6–12, 16, p.4–12]</span>
+        <span>04 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 05 -->
+    <section class="slide" data-title="LMCache：走出單張 GPU 的企業級 KV Cache 層">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag teal">里程碑 2 · 企業級系統層</span>
+          <h2>LMCache：走出單張 GPU 的企業級 KV Cache 層</h2>
+        </div>
+        <span class="page-badge">05 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2-wide">
+          <div class="card accent-teal">
+            <h3>三大系統工程支柱</h3>
+            <ol>
+              <li><strong>Chunk 批次搬運（預設 256 tokens）</strong>：以客製 CUDA kernel 聚合成連續 streaming buffer 再由 DMA 搬運，CPU 載入頻寬達 <strong>400 Gbps</strong>（較 vLLM 原生 <strong>88 Gbps</strong> 快 <strong>4.5×</strong>）<code>[LMCache, §5.1, §8.6, Table 5, p.6, 13]</code>。</li>
+              <li><strong>雙層管線＋零複製</strong>：逐層 CUDA stream 重疊＋排隊非同步預取（E2E 降 <strong>1.46×</strong>），搭配參考計數 Zero-Copy 與三指標 Dynamic Offloading <code>[LMCache, §5.2–5.3, §8.6, Fig. 7, 13, p.6–8, 14]</code>。</li>
+              <li><strong>雙標準化介面</strong>：KV Connector API（獲 NVIDIA Dynamo、llm-d、AIBrix、KServe 採用）＋ Controller API（<code>lookup</code>/<code>move</code>/<code>pin</code>/<code>compress</code>）<code>[LMCache, §6–7, Table 2–3, p.8–10]</code>。</li>
+            </ol>
+          </div>
+          <div class="card accent-blue">
+            <h3>企業痛點：分頁小檔（16–64 KB）拖垮頻寬</h3>
+            <p>5 週遙測使用者增 <strong>23.21×</strong>、KV 儲存量增 <strong>5.57×</strong> 遠超 HBM；分頁小檔無法打滿頻寬 <code>[LMCache, §2.2, §3.1.1, Table 1, p.1, 3–4]</code>：</p>
+            <svg viewBox="0 0 430 162" width="100%" height="162">
+              <text x="6" y="20" font-size="12.5" font-weight="700" fill="#334155">網路傳輸大小 vs 頻寬（Table 1）</text>
+              <text x="6" y="45" font-size="12" fill="#64748b">64 KB 小頁</text>
+              <rect x="92" y="33" width="24" height="16" rx="4" fill="#e11d48" />
+              <text x="122" y="45" font-size="12" font-weight="700" fill="#e11d48">4 GB/s</text>
+              <text x="6" y="72" font-size="12" fill="#64748b">16 MB 大塊</text>
+              <rect x="92" y="60" width="270" height="16" rx="4" fill="#0d9488" />
+              <text x="368" y="72" font-size="12" font-weight="700" fill="#0d9488">49 GB/s</text>
+
+              <line x1="6" y1="92" x2="424" y2="92" stroke="#e2e8f0" />
+              <text x="6" y="112" font-size="12.5" font-weight="700" fill="#334155">CPU 卸載載入頻寬（Table 5）</text>
+              <text x="6" y="135" font-size="12" fill="#64748b">vLLM 原生</text>
+              <rect x="92" y="123" width="60" height="15" rx="4" fill="#94a3b8" />
+              <text x="158" y="135" font-size="12" font-weight="700" fill="#475569">88 Gbps</text>
+              <text x="6" y="157" font-size="12" fill="#0f172a" font-weight="700">LMCache</text>
+              <rect x="92" y="145" width="272" height="15" rx="4" fill="#2563eb" />
+              <text x="370" y="157" font-size="12" font-weight="700" fill="#2563eb">400 Gbps</text>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi teal"><div class="val">1.9–8.1×</div><div class="lbl">單機 CPU Offloading TTFT 縮減</div></div>
+          <div class="kpi"><div class="val">2.3–14×（最高 15×）</div><div class="lbl">推理吞吐量提升</div></div>
+          <div class="kpi indigo"><div class="val">1.53–1.84×</div><div class="lbl">PD 分離平均 TTFT 降幅（vs vLLM 原生）</div></div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/lmcache.md｜[LMCache, §2.2–8.6, Table 1, 5, Fig. 8, 12–13, p.3–14]</span>
+        <span>05 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 06 -->
+    <section class="slide" data-title="企業生產現場的兩個反直覺真相（LMCache 實戰教訓）">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag amber">生產實戰教訓</span>
+          <h2>企業生產現場的兩個反直覺真相（LMCache）</h2>
+        </div>
+        <span class="page-badge">06 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card accent-emerald">
+            <h3>真相一：遠端儲存竟比 Prefill 快——但有交叉點！</h3>
+            <ul>
+              <li>現代高速物件儲存（如 S3 Express）讓 <strong>Company C</strong> 直接從遠端載入 KV 反而比完整 Prefill 降低 <strong>22–32% TTFT</strong> <code>[LMCache, §9, p.15]</code>。</li>
+              <li><strong>前提邊界（B200 敏感度分析）</strong>：若網路頻寬僅 <strong>32 Gbps</strong>，唯有輸入超過 <strong>256K tokens</strong> 載入才勝過重算；達 <strong>64–128 Gbps</strong> 才全序列長度皆勝出 <code>[LMCache, §8.7, Fig. 15, p.14–15]</code>。</li>
+            </ul>
+            <div class="callout emerald" style="margin-top:auto;">
+              <strong>工程啟示：</strong>不可盲目一律載入，系統必須依網路頻寬與上下文長度做<strong>自適應載入決策</strong>。
+            </div>
+          </div>
+          <div class="card accent-rose">
+            <h3>真相二：截斷對話開頭，反讓快取命中率直接腰斬！</h3>
+            <ul>
+              <li>工業界常見滑動視窗 <strong>Context Truncation</strong>（僅保留最新 tokens）會破壞前綴雜湊匹配。</li>
+              <li><strong>Company F</strong> 真實流量實測：截斷後前綴快取命中率從 <strong>~85%</strong> 暴跌至 <strong>~45%</strong> <code>[LMCache, §9, p.15]</code>。</li>
+            </ul>
+            <svg viewBox="0 0 480 96" width="100%" height="96" style="margin-top:4px;">
+              <text x="10" y="28" font-size="13" font-weight="700" fill="#0f172a">無截斷（Append-Only）</text>
+              <rect x="175" y="14" width="238" height="20" rx="5" fill="#059669" />
+              <text x="422" y="29" font-size="14" font-weight="800" fill="#059669">~85%</text>
+              <text x="10" y="70" font-size="13" font-weight="700" fill="#0f172a">滑動視窗截斷</text>
+              <rect x="175" y="56" width="126" height="20" rx="5" fill="#e11d48" />
+              <text x="310" y="71" font-size="14" font-weight="800" fill="#e11d48">~45%（腰斬）</text>
+            </svg>
+            <div class="callout rose" style="margin-top:auto;">
+              <strong>工程啟示：</strong>長對話與代理系統應盡量採 <strong>append-only</strong> 上下文管理以保護前綴快取。
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>真實企業流量回放（Company F &amp; G）：</strong>導入 LMCache 後，高 QPS 下 TTFT 降低 <strong>3.7–6.8×</strong>、ITL 降低 <strong>19%–58%</strong> <code>[LMCache, §8.3, Fig. 9–10, p.12]</code>。
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/lmcache.md、wiki/syntheses/conflicts-and-tensions.md｜[LMCache, §8.3, §8.7, §9, Fig. 9–10, 15, p.12, 14–15]</span>
+        <span>06 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 07 -->
+    <section class="slide" data-title="RelayCaching：化解多代理系統 O(M²) 級聯冗餘">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag amber">里程碑 3 · 多代理動態接力</span>
+          <h2>RelayCaching：化解多代理系統 O(M²) 級聯冗餘</h2>
+        </div>
+        <span class="page-badge">07 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2-wide">
+          <div class="card accent-amber">
+            <h3>問題與層×Token 雙維稀疏修正</h3>
+            <ul>
+              <li><strong>痛點</strong>：Architect → Developer → Reviewer 接力時，上游動態輸出嵌入下游不同角色提示（prefix variation），累積 Prefill 成本呈 <strong>O(M²)</strong> 暴增 <code>[RelayCaching, §1, Fig. 1, p.1–2]</code>。</li>
+              <li><strong>六模型（0.6B–32B）三大規律</strong>：Key/Value Norm 皆 &gt;0.92，唯獨 <strong>Value Cosine（0.800）</strong> 為主導偏差；層間呈 <strong>U 型曲線</strong>（僅中層偏差大）；相鄰層 Spearman 相關迅速穩定 <strong>&gt; 0.9</strong> <code>[RelayCaching, §3.1–3.3, Fig. 2–4, p.3–4]</code>。</li>
+              <li><strong>精準修正</strong>：跳過淺／深層，僅於中層 <code>[L_start, L_end]</code> 與偵測層 <code>L_det</code> 採用<strong>偏差（1.5×均值）∪ 注意力影響力（1.45×均值）∪ 尾端 10 tokens</strong> 三合一篩選（GSM8K 消融：僅偏差 79.68% → 三合一拉回 <strong>84.84%</strong>）；目前限<strong>同質多代理</strong>（同架構同權重）<code>[RelayCaching, §4.2–4.3, §5.4, Table 3, App. C, p.5–8, 18]</code>。</li>
+            </ul>
+          </div>
+          <div class="card accent-blue">
+            <h3>U 型中層偏差與 12K 長文次線性加速</h3>
+            <svg viewBox="0 0 430 120" width="100%" height="120">
+              <rect x="135" y="10" width="160" height="84" rx="6" fill="#fef3c7" opacity="0.85" />
+              <text x="215" y="25" text-anchor="middle" font-size="11.5" font-weight="700" fill="#92400e">僅修正中層 [L_start, L_end]</text>
+              <path d="M24 30 Q90 32 145 55 Q215 86 285 52 Q345 34 406 33" fill="none" stroke="#d97706" stroke-width="3.5" />
+              <text x="68" y="84" text-anchor="middle" font-size="11" fill="#64748b">淺層直接跳過</text>
+              <text x="360" y="84" text-anchor="middle" font-size="11" fill="#64748b">深層直接跳過</text>
+              <text x="215" y="112" text-anchor="middle" font-size="11.5" fill="#475569">Layer Depth（Value Cosine U 型相似度曲線示意）</text>
+            </svg>
+            <svg viewBox="0 0 430 112" width="100%" height="112">
+              <text x="6" y="16" font-size="12" font-weight="700" fill="#334155">12K 長文平均每代理 TTFT（Fig. 8）</text>
+              <text x="6" y="42" font-size="12" fill="#64748b">Full Prefill</text>
+              <rect x="98" y="30" width="265" height="15" rx="4" fill="#94a3b8" />
+              <text x="370" y="42" font-size="12" font-weight="700" fill="#475569">3.89 s</text>
+              <text x="6" y="70" font-size="12" fill="#64748b">CacheBlend</text>
+              <rect x="98" y="58" width="74" height="15" rx="4" fill="#f59e0b" />
+              <text x="178" y="70" font-size="12" font-weight="700" fill="#b45309">1.08 s（線性）</text>
+              <text x="6" y="98" font-size="12" font-weight="700" fill="#0f172a">RelayCaching</text>
+              <rect x="98" y="86" width="29" height="15" rx="4" fill="#059669" />
+              <text x="134" y="98" font-size="12" font-weight="800" fill="#059669">0.42 s（9.2× 次線性）</text>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi emerald"><div class="val">&gt;80%</div><div class="lbl">GSM8K / MMLU / HumanEval 重用率</div></div>
+          <div class="kpi amber"><div class="val">4.71×</div><div class="lbl">5 代理鏈 TTFT 加速</div></div>
+          <div class="kpi"><div class="val">9.2×</div><div class="lbl">12K 長文加速（次線性擴展）</div></div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/relaycaching.md｜[RelayCaching, §3–5, Table 1–3, Fig. 2–5, 8, Appendix C, p.3–8, 18]</span>
+        <span>07 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 08 -->
+    <section class="slide" data-title="DroidSpeak：同底模微調模型間的連續層選擇性重算">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag indigo">里程碑 4 · 同底模跨模型</span>
+          <h2>DroidSpeak：同底模微調模型間的連續層選擇性重算</h2>
+        </div>
+        <span class="page-badge">08 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card accent-indigo">
+            <h3>跨微調模型洞察與 E-Cache 切換陷阱</h3>
+            <ul>
+              <li><strong>全盤重用崩潰</strong>：同底模微調變體若直接全用 baseline KV，HotpotQA 損失 <strong>&gt;50%</strong> F1 <code>[DroidSpeak, §3.2.1, Fig. 6, p.4–5]</code>。</li>
+              <li><strong>僅 11% 為關鍵層</strong>：平均僅 <strong>11%</strong> 層對微調敏感（單層重用掉 &gt;10% F1）<code>[DroidSpeak, §3.2.2, Fig. 7, p.5–6]</code>。</li>
+              <li><strong>為何不能散落重算？</strong>每次從「重用」切回「重算」皆須傳送 baseline <strong>E cache</strong>（體積達 KV 的 <strong>2×</strong> 至 GQA 70B 的 <strong>4×</strong>），且多次載入會放大累積誤差 <code>[DroidSpeak, §4.1, Fig. 9–11, p.6–7]</code>。</li>
+              <li><strong>兩階段設計</strong>：採 <code>recompute → reuse → recompute → reuse</code> 限制至多 <strong>1 次</strong>切換；離線 50 筆 HotpotQA 剖析帕累托前緣（跨資料集平均差僅 <strong>2 分</strong> F1），線上依延遲 SLO 動態調整 <code>[DroidSpeak, §4.2–4.4, §5.1, §5.5, p.7–11]</code>。</li>
+            </ul>
+          </div>
+          <div class="card accent-teal">
+            <h3>散落關鍵層 vs. 單一連續區塊視覺對照</h3>
+            <svg viewBox="0 0 520 205" width="100%" height="205">
+              <text x="10" y="22" font-size="13" font-weight="700" fill="#be123c">✕ 僅重算散落關鍵層（多次 E-Cache 切換 → 誤差累積＋傳輸爆炸）</text>
+              <rect x="10" y="34" width="60" height="32" rx="5" fill="#d1fae5" stroke="#059669" /><text x="40" y="54" text-anchor="middle" font-size="11.5" fill="#065f46">Reuse</text>
+              <rect x="76" y="34" width="60" height="32" rx="5" fill="#ffe4e6" stroke="#e11d48" /><text x="106" y="54" text-anchor="middle" font-size="11.5" fill="#9f1239">Recomp</text>
+              <rect x="142" y="34" width="60" height="32" rx="5" fill="#d1fae5" stroke="#059669" /><text x="172" y="54" text-anchor="middle" font-size="11.5" fill="#065f46">Reuse</text>
+              <rect x="208" y="34" width="60" height="32" rx="5" fill="#ffe4e6" stroke="#e11d48" /><text x="238" y="54" text-anchor="middle" font-size="11.5" fill="#9f1239">Recomp</text>
+              <rect x="274" y="34" width="60" height="32" rx="5" fill="#d1fae5" stroke="#059669" /><text x="304" y="54" text-anchor="middle" font-size="11.5" fill="#065f46">Reuse</text>
+              <rect x="340" y="34" width="60" height="32" rx="5" fill="#ffe4e6" stroke="#e11d48" /><text x="370" y="54" text-anchor="middle" font-size="11.5" fill="#9f1239">Recomp</text>
+              <rect x="406" y="34" width="96" height="32" rx="5" fill="#d1fae5" stroke="#059669" /><text x="454" y="54" text-anchor="middle" font-size="11.5" fill="#065f46">Reuse</text>
+              <text x="73" y="84" text-anchor="middle" font-size="11" font-weight="700" fill="#e11d48">↑ E #1</text>
+              <text x="205" y="84" text-anchor="middle" font-size="11" font-weight="700" fill="#e11d48">↑ E #2</text>
+              <text x="337" y="84" text-anchor="middle" font-size="11" font-weight="700" fill="#e11d48">↑ E #3</text>
+
+              <line x1="10" y1="102" x2="505" y2="102" stroke="#e2e8f0" />
+
+              <text x="10" y="126" font-size="13" font-weight="700" fill="#0f766e">✓ DroidSpeak 單一連續區塊（至多 1 次 E-Cache 傳輸）</text>
+              <rect x="10" y="138" width="110" height="34" rx="5" fill="#d1fae5" stroke="#059669" /><text x="65" y="159" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">Reuse 淺層</text>
+              <rect x="126" y="138" width="220" height="34" rx="5" fill="#e0e7ff" stroke="#4f46e5" /><text x="236" y="159" text-anchor="middle" font-size="12" font-weight="700" fill="#312e81">單一連續 Recompute 區間</text>
+              <rect x="352" y="138" width="150" height="34" rx="5" fill="#d1fae5" stroke="#059669" /><text x="427" y="159" text-anchor="middle" font-size="12" font-weight="700" fill="#065f46">Reuse 深層</text>
+              <text x="124" y="192" text-anchor="middle" font-size="11.5" font-weight="700" fill="#4f46e5">↑ 唯一 1 次 E-Cache 切換（InfiniBand 傳輸僅佔 ≤ 11%）</text>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-row cols-4">
+          <div class="kpi indigo"><div class="val">1.7–2.6×</div><div class="lbl">Prefill 延遲降幅（8 配對×3 資料集）</div></div>
+          <div class="kpi emerald"><div class="val">2–3×</div><div class="lbl">線上吞吐提升（掉點 ≤ 1%）</div></div>
+          <div class="kpi teal"><div class="val">1.5×</div><div class="lbl">共享儲存記憶體節省</div></div>
+          <div class="kpi amber"><div class="val">≤ 11%</div><div class="lbl">InfiniBand 跨節點傳輸占比</div></div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/droidspeak.md｜[DroidSpeak, §1, §3.2–5.5, Fig. 1, 6–17, p.1, 4–11]</span>
+        <span>08 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 09 -->
+    <section class="slide" data-title="Cross-Model KV Transfer：跨尺寸模型的閉式線性映射">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag indigo">里程碑 5 · 跨尺寸免重算</span>
+          <h2>Cross-Model KV Transfer：跨尺寸模型的閉式線性映射</h2>
+        </div>
+        <span class="page-badge">09 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card accent-blue">
+            <h3>三步驟無梯度閉式 Ridge Mapper</h3>
+            <p>針對<strong>同家族、dense full-attention 且 Matched-KV</strong>（KV 頭數 8、單頭維度 128 相同）配對，跨模型 KV 常具顯著線性結構（Qwen3 14B→32B 單層解釋 K <strong>56%</strong>、<em>k</em>=8 層達 <strong>79%</strong>）<code>[Cross-Model KV, §2.1, §2.3, §5, Table 7, p.2–4, 9, 14]</code>。</p>
+            <ol>
+              <li><strong>跨層 top-<em>k</em> 源層選擇</strong>：消融貢獻最大（<em>k</em>=8→1 使 GSM8K 從 90.98% 崩至 0.38%）<code>[§3.2, §4.3, Table 2]</code>。</li>
+              <li><strong>無位置內容空間映射</strong>：剝除源 RoPE → 映射 → 重施目標 RoPE，泛化至 32K 長文 <code>[§3.3, p.5]</code>。</li>
+              <li><strong>逐頭嶺回歸閉式解</strong>：500 條 FineWeb-Edu 序列於 8×H100 約 <strong>47–87 分鐘</strong>擬合，免反向傳播；Mapper 佔 <strong>4–12 GB</strong> <code>[§3.1, Table 12, App. E]</code>。</li>
+            </ol>
+          </div>
+          <div class="card accent-indigo">
+            <h3>分層結果：Tier 1 亮眼 vs. Tier 2 靠 MLP 救援</h3>
+            <ul>
+              <li><strong>Tier 1（4 組高保真）</strong>：平均保留 <strong>73–98%</strong>（Qwen3 14B→32B <strong>97.6%</strong>、Llama 3.1 8B→70B <strong>72.8%</strong>）；S→L 加速 <strong>2.7–25.1×</strong>（Qwen3 14B→32B 於 32K 為 <strong>278 ms vs 6,975 ms = 25×</strong>），CoQA 10 輪穩定 <code>[§4.2, §4.6–4.7, Table 1, 5, 16]</code>。</li>
+              <li><strong>Tier 2（2 組線性失敗）</strong>：Ministral 3B→14B（<strong>44.2%</strong>）與 8B→14B（<strong>41.6%</strong>）退化；換用 2 層 MLP 救回 <strong>+24.3 至 +36.8 pp</strong>（HellaSwag 全破 90%）<code>[§4.2, §4.4, Table 1, 3]</code>。</li>
+            </ul>
+            <svg viewBox="0 0 490 120" width="100%" height="120" style="margin-top:auto;">
+              <text x="6" y="22" font-size="12" fill="#334155">Qwen3 14B→32B（Tier 1）</text>
+              <rect x="178" y="10" width="244" height="15" rx="4" fill="#059669" /><text x="428" y="22" font-size="12" font-weight="700" fill="#059669">97.6%</text>
+              <text x="6" y="49" font-size="12" fill="#334155">Llama 3.1 8B→70B（Tier 1）</text>
+              <rect x="178" y="37" width="182" height="15" rx="4" fill="#2563eb" /><text x="366" y="49" font-size="12" font-weight="700" fill="#2563eb">72.8%</text>
+              <text x="6" y="76" font-size="12" fill="#334155">Ministral 8B→14B（Ridge）</text>
+              <rect x="178" y="64" width="104" height="15" rx="4" fill="#e11d48" /><text x="288" y="76" font-size="12" font-weight="700" fill="#e11d48">41.6% 均</text>
+              <text x="6" y="103" font-size="12" font-weight="700" fill="#4f46e5">Ministral 8B→14B（MLP）</text>
+              <rect x="178" y="91" width="238" height="15" rx="4" fill="#4f46e5" /><text x="422" y="103" font-size="12" font-weight="800" fill="#4f46e5">+36.8 pp</text>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi emerald"><div class="val">73–98%</div><div class="lbl">4 組 Tier 1 平均準確率保留</div></div>
+          <div class="kpi"><div class="val">2.7–25.1×</div><div class="lbl">S→L 加速（Qwen3 32K 達 25×）</div></div>
+          <div class="kpi indigo"><div class="val">+24.3–36.8 pp</div><div class="lbl">MLP 救回 Tier 2 HellaSwag</div></div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/papers/cross-model-kv-transfer.md｜[Cross-Model KV, §2.3–4.7, §5, Table 1–3, 5, 7, 12, 16, p.3–9, 14–19]</span>
+        <span>09 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 10 -->
+    <section class="slide" data-title="貫穿五篇的兩條隱藏主線：RoPE 對齊與誤差落點">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag teal">跨篇技術串聯</span>
+          <h2>貫穿五篇的兩條隱藏主線：RoPE 對齊與誤差落點</h2>
+        </div>
+        <span class="page-badge">10 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2">
+          <div class="card accent-teal">
+            <h3>主線 A｜RoPE 旋轉位置編碼對齊三部曲</h3>
+            <ol>
+              <li><strong>CacheBlend</strong>：預存 K 向量乘上一次相對旋轉矩陣，近零開銷恢復非前綴位置 <code>[CacheBlend, Footnote 3, App. A]</code>。</li>
+              <li><strong>RelayCaching</strong>：上游直接存 <strong>Pre-RoPE KV</strong>，下游接力 Prefill 時再重施目標位置 RoPE <code>[RelayCaching, §4.2, Fig. 5, p.5]</code>。</li>
+              <li><strong>Cross-Model KV Transfer</strong>：於無位置內容空間完成線性映射，徹底解耦位置與語意 <code>[Cross-Model KV, §3.3, §4.3, Table 2]</code>：</li>
+            </ol>
+            <div class="formula">K̂_t = ( K_s · R⁻¹_Θs(t) · W_K + b_K ) · R_Θt(t)</div>
+            <div class="callout rose" style="margin-top:auto;">
+              <strong>消融警示：</strong>若推論時遺漏重施 RoPE，Qwen3 14B→32B 的 MMLU 崩跌至 <strong>25.79%</strong>、GSM8K 崩跌至 <strong>4.17%</strong> <code>[Table 2, p.7]</code>。
+            </div>
+          </div>
+          <div class="card accent-indigo">
+            <h3>主線 B｜偏差指標進化：誤差「落點」&gt; 誤差「大小」</h3>
+            <ul>
+              <li>跨 12 組 matched-KV 配對評估，校準集重建指標 <strong>R²_K</strong> 與 HellaSwag 保留率毫無正相關（Pearson <strong>r = −0.20</strong>）<code>[Cross-Model KV, §4.5, p.7–8]</code>。</li>
+              <li>真正決定下游表現的是 <strong>Attention-Output Cosine</strong>（<strong>r = +0.57</strong>）——因為注意力只讀取目標 Query 敏感子空間。</li>
+              <li>MLP 救回 +37 pp 的關鍵，在於大幅降低 <strong>K-concentration（Δ ≈ −2.5）</strong>，將殘差推離注意力讀取方向 <code>[Table 4, p.8]</code>。</li>
+            </ul>
+            <svg viewBox="0 0 490 120" width="100%" height="120" style="margin-top:auto;">
+              <rect x="8" y="10" width="226" height="98" rx="10" fill="#fff1f2" stroke="#fda4af" />
+              <text x="121" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="#9f1239">校準集重建 R²_K（等權平均）</text>
+              <text x="121" y="72" text-anchor="middle" font-size="28" font-weight="800" fill="#e11d48">r = −0.20</text>
+              <text x="121" y="96" text-anchor="middle" font-size="12" fill="#881337">無法預測跨配對下游品質</text>
+
+              <rect x="254" y="10" width="228" height="98" rx="10" fill="#ecfdf5" stroke="#6ee7b7" />
+              <text x="368" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Attention-Output Cosine</text>
+              <text x="368" y="72" text-anchor="middle" font-size="28" font-weight="800" fill="#059669">r = +0.57</text>
+              <text x="368" y="96" text-anchor="middle" font-size="12" fill="#047857">捕捉注意力敏感子空間誤差落點</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/concepts/rope-position-alignment.md、wiki/syntheses/conflicts-and-tensions.md、wiki/papers/cross-model-kv-transfer.md｜[CacheBlend, App. A; RelayCaching, §4.2; Cross-Model KV, §3.3, §4.3, §4.5, Table 2, 4]</span>
+        <span>10 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 11 -->
+    <section class="slide" data-title="別只看單篇結論！四大跨文獻張力與前提邊界">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag rose">跨文獻張力並陳</span>
+          <h2>別只看單篇結論！四大跨文獻張力與前提邊界</h2>
+        </div>
+        <span class="page-badge">11 / 12</span>
+      </div>
+      <div class="content">
+        <div class="grid-2x2">
+          <div class="card accent-rose">
+            <h3>⚠️ 張力 1｜靜態 RAG vs. 動態 MAS</h3>
+            <p><strong>CacheBlend</strong> 在靜態 RAG 品質損 <strong>≤ 0.02</strong>；但 <strong>RelayCaching</strong> 將其移至動態多代理時 GSM8K 跌至 <strong>74.73–77.56%</strong> 且 12K 呈線性膨脹（1.08 s vs 0.42 s），因解碼重用主導偏差為 <strong>Value Cosine（0.800）</strong> 而非 Value Norm（0.926）<code>[CacheBlend, §7.2; RelayCaching, §3.1, §5.2–5.3]</code>。</p>
+          </div>
+          <div class="card accent-indigo">
+            <h3>⚠️ 張力 2｜同架構重算 vs. 跨尺寸映射</h3>
+            <p><strong>DroidSpeak</strong> 不假設線性但限同架構（1.7–2.6×）；<strong>NVIDIA Ridge</strong> 跨尺寸最高快 <strong>25×</strong>，但在 Ministral Tier 2 五基準平均跌至 <strong>41.6–44.2%</strong>，須改訓練 MLP 救回 HellaSwag 至 <strong>92–96%</strong> <code>[DroidSpeak, §3.1, §5.2; Cross-Model KV, §4.2, §4.4, Table 1, 3]</code>。</p>
+          </div>
+          <div class="card accent-blue">
+            <h3>⚠️ 張力 3｜重建誤差 R² vs. 子空間保真度</h3>
+            <p><strong>R²</strong> 適合單配對挑選源層，跨配對評估卻完全失靈（<strong>r = −0.20</strong>）；必須改看 <strong>Attention-Output Cosine（r = +0.57）</strong> 與 <strong>K-concentration</strong>（誤差是否落在 Query 讀取方向）<code>[Cross-Model KV, §4.5, Table 4]</code>。</p>
+          </div>
+          <div class="card accent-amber">
+            <h3>⚠️ 張力 4｜遠端卸載交叉點與截斷反噬</h3>
+            <p>高速物件儲存降 <strong>22–32% TTFT</strong>，但 <strong>32 Gbps</strong> 低頻寬下須 &gt;<strong>256K tokens</strong> 才勝過重算；滑動視窗截斷則讓前綴命中率從 <strong>~85%</strong> 腰斬至 <strong>~45%</strong> <code>[LMCache, §8.7, §9, Fig. 15]</code>。</p>
+          </div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/syntheses/conflicts-and-tensions.md｜[CacheBlend, §7.2; DroidSpeak, §3.1, §5.2; LMCache, §8.7, §9; RelayCaching, §3.1, §5.2–5.3; Cross-Model KV, §4.2–4.5]</span>
+        <span>11 / 12</span>
+      </footer>
+    </section>
+
+    <!-- SLIDE 12 -->
+    <section class="slide" data-title="實務選型指南與課程總結">
+      <div class="slide-header">
+        <div class="title-group">
+          <span class="tag emerald">選型與總結</span>
+          <h2>實務選型指南與課程總結</h2>
+        </div>
+        <span class="page-badge">12 / 12</span>
+      </div>
+      <div class="content">
+        <table class="clean-table">
+          <thead>
+            <tr>
+              <th style="width:24%;">應用場景</th>
+              <th style="width:20%;">對應方案</th>
+              <th style="width:34%;">核心機制</th>
+              <th style="width:22%;">代表成效</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>RAG 靜態多區塊拼接</strong></td>
+              <td><strong>CacheBlend</strong></td>
+              <td>Token 級 HKVD 重算（5–18%）＋逐層 I/O 管線化</td>
+              <td>TTFT 降 <strong>2.2–3.3×</strong></td>
+            </tr>
+            <tr>
+              <td><strong>企業跨查詢卸載／PD 分離</strong></td>
+              <td><strong>LMCache</strong></td>
+              <td>256-token Chunk 搬運（400 Gbps）＋標準化雙 API</td>
+              <td>最高升 <strong>15×</strong> 吞吐</td>
+            </tr>
+            <tr>
+              <td><strong>同質多代理動態接力</strong></td>
+              <td><strong>RelayCaching</strong></td>
+              <td>U 型中層＋偏差／影響力／尾端 10 tok 三合一修正</td>
+              <td>重用 <strong>&gt;80%</strong>、12K 快 <strong>9.2×</strong></td>
+            </tr>
+            <tr>
+              <td><strong>同底模微調模型共享</strong></td>
+              <td><strong>DroidSpeak</strong></td>
+              <td>單一切換點連續層重算＋帕累托動態調度</td>
+              <td>Prefill 降 <strong>1.7–2.6×</strong></td>
+            </tr>
+            <tr>
+              <td><strong>同家族跨尺寸路由／級聯</strong></td>
+              <td><strong>Cross-Model KV</strong></td>
+              <td>閉式 Ridge（Tier 2 換 MLP）＋RoPE 內容空間解耦</td>
+              <td>Tier 1 保留 <strong>73–98%</strong>、快 <strong>2.7–25×</strong></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="background:linear-gradient(135deg,#0f172a,#1e3a8a);color:#f8fafc;border-radius:12px;padding:18px 24px;margin-top:auto;">
+          <div style="font-size:13px;font-weight:700;color:#7dd3fc;letter-spacing:0.6px;text-transform:uppercase;">一句話帶走</div>
+          <div style="font-size:20px;font-weight:800;line-height:1.45;margin-top:5px;">
+            KV Cache 正從「單次推論的 GPU 副產品」，演進為<strong>跨查詢、跨節點、跨代理與跨模型的 AI-native 計算與儲存核心原語</strong>。
+          </div>
+        </div>
+      </div>
+      <footer class="slide-source">
+        <span>出處：wiki/syntheses/kv-reuse-landscape.md、wiki/overview.md｜[CacheBlend, §4.3, §7.2–7.3; LMCache, Abstract, §5–8; RelayCaching, §4–5; DroidSpeak, §4–5; Cross-Model KV, §3–5]</span>
+        <span>12 / 12</span>
+      </footer>
+    </section>
+
+  </div>
+</div>
+
+<!-- Floating navigation bar -->
+<div class="controls">
+  <button id="btnPrev" title="上一頁 (←)">← 上一頁</button>
+  <span class="slide-counter" id="slideCounter">01 / 12</span>
+  <button id="btnNext" title="下一頁 (→)">下一頁 →</button>
+  <button id="btnGrid" title="總覽網格 (G)">總覽 (G)</button>
+</div>
+
+<!-- Overview modal -->
+<div class="overview-overlay" id="overviewOverlay">
+  <div class="overview-header">
+    <strong style="font-size:20px;">投影片總覽（點擊跳轉 / 按 Esc 關閉）</strong>
+    <button id="btnCloseGrid" style="background:#334155;color:#fff;border:none;padding:7px 14px;border-radius:8px;cursor:pointer;font-weight:700;">關閉</button>
+  </div>
+  <div class="overview-grid" id="overviewGrid"></div>
+</div>
+
+<script>
+(function () {
+  const deck = document.getElementById('deck');
+  const slides = Array.from(document.querySelectorAll('section.slide'));
+  const counter = document.getElementById('slideCounter');
+  const progressBar = document.getElementById('progressBar');
+  const overlay = document.getElementById('overviewOverlay');
+  const grid = document.getElementById('overviewGrid');
+  let current = 0;
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function fitDeck() {
+    const padX = 24, padY = 24;
+    const scale = Math.min((window.innerWidth - padX) / 1280, (window.innerHeight - padY) / 720);
+    deck.style.transform = `scale(${Math.max(0.25, scale)})`;
+  }
+
+  function show(index) {
+    current = Math.max(0, Math.min(slides.length - 1, index));
+    slides.forEach((s, i) => s.classList.toggle('active', i === current));
+    counter.textContent = `${pad(current + 1)} / ${pad(slides.length)}`;
+    progressBar.style.width = `${((current + 1) / slides.length) * 100}%`;
+    Array.from(grid.children).forEach((el, i) => el.classList.toggle('current', i === current));
+    history.replaceState(null, '', `#${current + 1}`);
+  }
+
+  function buildGrid() {
+    grid.innerHTML = '';
+    slides.forEach((s, i) => {
+      const item = document.createElement('div');
+      item.className = 'overview-item' + (i === current ? ' current' : '');
+      item.innerHTML = `<div class="ov-num">SLIDE ${pad(i + 1)}</div><div class="ov-title">${s.dataset.title || ''}</div>`;
+      item.addEventListener('click', () => {
+        show(i);
+        overlay.classList.remove('open');
+      });
+      grid.appendChild(item);
+    });
+  }
+
+  // Overflow diagnostic helper (callable via console or automated audit)
+  window.__auditOverflow = function () {
+    const results = [];
+    const saved = current;
+    slides.forEach((s, i) => {
+      slides.forEach((x, j) => x.classList.toggle('active', j === i));
+      const hOverflow = s.scrollHeight - s.clientHeight;
+      const wOverflow = s.scrollWidth - s.clientWidth;
+      const footer = s.querySelector('footer.slide-source');
+      const content = s.querySelector('.content');
+      let overlap = 0;
+      if (footer && content) {
+        const fRect = footer.getBoundingClientRect();
+        const cRect = content.getBoundingClientRect();
+        overlap = Math.max(0, Math.round(cRect.bottom - fRect.top));
+      }
+      results.push({ slide: i + 1, hOverflow, wOverflow, overlap });
+    });
+    show(saved);
+    return results;
+  };
+
+  document.getElementById('btnPrev').addEventListener('click', () => show(current - 1));
+  document.getElementById('btnNext').addEventListener('click', () => show(current + 1));
+  document.getElementById('btnGrid').addEventListener('click', () => overlay.classList.toggle('open'));
+  document.getElementById('btnCloseGrid').addEventListener('click', () => overlay.classList.remove('open'));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'g' || e.key === 'G') { overlay.classList.toggle('open'); return; }
+    if (e.key === 'Escape') { overlay.classList.remove('open'); return; }
+    if (overlay.classList.contains('open')) return;
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); show(current + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(current - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0); }
+    else if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
+  });
+
+  window.addEventListener('resize', fitDeck);
+  buildGrid();
+  fitDeck();
+  const hashNum = parseInt(location.hash.replace('#', ''), 10);
+  show(!isNaN(hashNum) && hashNum >= 1 && hashNum <= slides.length ? hashNum - 1 : 0);
+
+  if (new URLSearchParams(location.search).get('audit') === '1') {
+    const out = document.createElement('pre');
+    out.id = 'audit-out';
+    out.style.display = 'none';
+    out.textContent = JSON.stringify(window.__auditOverflow());
+    document.body.appendChild(out);
+  }
+})();
+</script>
+</body>
+</html>

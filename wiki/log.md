@@ -21,3 +21,4 @@ updated: "2026-11-23"
 | 2026-11-23 | `ingest (3/5)` | `lmcache.md` | 匯入 LMCache，新增 `lmcache-system.md` 與 `conflicts-and-tensions.md`，增量更新管線化與推理引擎頁。 |
 | 2026-11-23 | `ingest (4/5)` | `relaycaching.md` | 匯入 RelayCaching，新增 `kv-deviation-metrics.md`，補入 CacheBlend vs RelayCaching 跨文獻張力並增量更新概念與綜合頁。 |
 | 2026-11-23 | `ingest (5/5)` | `cross-model-kv-transfer.md` | 匯入 Cross-Model KV Cache Transfer（NVIDIA），補齊 RoPE 內容空間解耦、Attention-Output Cosine vs $R^2$ 張力與 5 篇完整全景綜合。 |
+| 2026-11-23 | `slides` | `topic-kv-cache-reuse/` | 完成 10 關 Graph 版簡報 Workflow：通過 Gate 1–3、獨立子代理兩輪忠實度複審（12/12 PASS）與無頭 Chrome 1280×720 零溢出實測，交付 `deck.html` 與 `report.md`。 |
