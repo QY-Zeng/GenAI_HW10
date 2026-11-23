@@ -36,7 +36,11 @@ CacheBlend 結合兩大核心技術以同時取得「接近 Full KV Reuse 的速
 - **敏感度分析**：在 Yi-34B 上僅需 **5%–18%** 重算比例即可將品質損失壓在 **≤ 0.002**，對應 **4.1–6.6×** TTFT 縮減；且隨 batch size 增大，Prefill 占比提高使加速效益更顯著 `[CacheBlend, §7.3, Fig. 15–16, p.12]`。
 - **與其他 RAG 模式對比**：相較 LangChain MapReduce 降低 **2–5× TTFT** 且 F1 更高；相較 MapRerank 品質大幅領先 `[CacheBlend, §7.2, Fig. 13, p.10, 12]`。
 
-## 4. 限制與後續連結
+## 4. 限制與跨文獻張力
 - 僅適用於 Transformer 架構，尚未驗證於 Mamba、Griffin 等狀態空間或混合架構 `[CacheBlend, §9, p.13]`。
 - 尚未測試多節點跨機 KV 共享與 DistServe 等新式分離架構，亦聚焦於靜態離線預計算的文字區塊 `[CacheBlend, §9, p.13]`。
-- 延伸閱讀：[KV Cache Reuse 領域總覽](../overview.md)、[跨論文方法全景對照](../syntheses/kv-reuse-landscape.md)。
+
+> [!WARNING] ⚠️ 跨文獻張力／差異
+> - **套用至動態多代理 Decode-to-Prefill 的精度與擴展瓶頸**：CacheBlend 在靜態 RAG 達成品質損失 ≤ 0.02 `[CacheBlend, §7.2, p.12]`；但 [RelayCaching](./relaycaching.md) 實測指出，在動態多代理場景中，CacheBlend 基於 value-norm 的選擇機制無法捕捉主導解碼重用的 Value Cosine 方向偏差（GSM8K 準確率降至 74.73–77.56%），且固定比例（如 20%）使重算成本隨上下文線性擴展 `[RelayCaching, §5.2–5.3, Table 1, Fig. 8, p.7]`。詳見 [跨文獻張力與差異彙整](../syntheses/conflicts-and-tensions.md)。
+
+- 延伸閱讀：[KV Cache Reuse 領域總覽](../overview.md)、[KV 偏差衡量指標](../concepts/kv-deviation-metrics.md)、[跨論文方法全景對照](../syntheses/kv-reuse-landscape.md)。
