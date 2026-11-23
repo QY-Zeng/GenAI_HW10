@@ -13,7 +13,6 @@
   - Workflow 規格：[.agents/workflows/topic-slides.md](.agents/workflows/topic-slides.md)
   - 交件檢查總報告：[topic-kv-cache-reuse/report.md](topic-kv-cache-reuse/report.md)
   - 獨立子代理忠實度審查紀錄：[topic-kv-cache-reuse/fidelity_review.md](topic-kv-cache-reuse/fidelity_review.md)
-  - 課程作業繳交稿：[SUBMISSION.md](SUBMISSION.md)
 
 ## 收錄之 5 篇核心論文（依技術演進順序逐篇 Ingest）
 1. **CacheBlend**（`arXiv:2405.16444v3`, EuroSys '25）— [筆記](wiki/papers/cacheblend.md)
