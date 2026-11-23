@@ -39,6 +39,10 @@ updated: "2026-11-23"
   - 單一資料集離線剖析可跨資料集泛化，F1 差距最大 4 分、平均僅 **2 分** `[DroidSpeak, §5.5, Fig. 17, p.10–11]`。
 - **對比改用小模型**：Llama-3.1-8B-Instruct 雖較 70B 降低 4× Prefill 延遲，但 F1 幾乎腰斬；DroidSpeak 在 70B 上無須來回搬運模型權重即可平滑縮放算力與延遲 `[DroidSpeak, §5.7, Fig. 19, p.11–12]`。
 
-## 4. 限制與後續連結
+## 4. 限制與跨文獻張力
 - **嚴格同架構前提**：僅適用於源自同一基礎模型且**結構完全相同**（相同層數、隱藏維度、KV 頭數）的微調變體；跨底模或跨尺寸模型需額外的表徵對齊技術 `[DroidSpeak, §3.1, §6, p.4, 12]`。
+
+> [!WARNING] ⚠️ 跨文獻張力／差異
+> - **同架構局部重算 vs. 跨尺寸閉式映射**：DroidSpeak 針對同架構微調變體採「選擇性重算連續關鍵層＋單次 E-cache 傳輸」`[DroidSpeak, §4.2, p.7]`；後續 [Cross-Model KV Cache Transfer](./cross-model-kv-transfer.md) 指出 DroidSpeak 無法跨尺寸運作（Table 6），並證明在同家族跨尺寸（matched-KV）模型間可直接用閉式逐頭 Ridge 映射完全跳過 receiver Prefill（最高 25× 加速），但遇到非線性配對時仍會退化並須改用 MLP `[Cross-Model KV, §2.2, §4.2, §4.4, Table 6, p.3, 6–7, 13]`。詳見 [跨文獻張力與差異彙整](../syntheses/conflicts-and-tensions.md)。
+
 - 延伸閱讀：[E-Cache 切換開銷](../concepts/e-cache-transition-overhead.md)、[跨論文方法全景對照](../syntheses/kv-reuse-landscape.md)、[KV Cache Reuse 領域總覽](../overview.md)。
