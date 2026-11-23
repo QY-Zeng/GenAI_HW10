@@ -196,7 +196,7 @@ def main() -> int:
                 incoming_links[resolved].add(wf.resolve())
 
         # Conflict / tension marker tracking
-        if "跨文獻張力" in text and wf != CONFLICTS_MD:
+        if "⚠️ 跨文獻張力" in text and wf not in (CONFLICTS_MD, INDEX_MD, LOG_MD):
             conflict_pages.append(wf)
 
     if broken_links:
