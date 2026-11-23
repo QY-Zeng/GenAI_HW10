@@ -24,11 +24,11 @@ topic-<slug>/
 | --- | --- | --- | --- | --- | --- |
 | 1. 檢索 Wiki | AI 節點 | `wiki/index.md`、`wiki/**/*.md` | 禁止讀取外部網路或未收錄文獻 | `sources.md` | — |
 | 2. 覆蓋率關卡 | 檢查腳本 | `sources.md`、`wiki/` | 不可自行修改檔案 | `python scripts/gate1_check_coverage.py <topic_dir>`（相關頁 ≥ 3 且覆蓋核心面向） | **不足 → 立刻停下**並告知缺少哪些資料 |
-| 3. 證據卡（平行） | AI 節點（平行） | **單一**指定 `wiki/` 來源頁 | **嚴禁混入其他論文或來源** | `cards/<source>.md` | 卡片錯誤 → 僅重抽該篇證據卡 |
+| 3. 證據卡（平行） | AI 節點（平行） | **單一**指定 `wiki/` 來源頁 | **嚴禁混入其他論文或來源**；每張卡須明列「適用前提／限制」與「每項數據綁定之模型／基準」以提前防止 Node 6 過度概括或歸屬歧義 | `cards/<source>.md` | 卡片錯誤 → 僅重抽該篇證據卡 |
 | 4. 大綱 | AI 節點 | `sources.md` + `cards/*.md` | 不可編造卡片以外的論點或數據 | `outline.md`（8–15 頁） | — |
 | 5. **人工確認** | **人工關卡** | `outline.md` | AI 必須暫停等待使用者審閱 | 使用者核准大綱 | 缺子題 → 退回 **Node 1 補檢索**；結構需調整 → 退回 **Node 4 修大綱** |
 | 6. 逐頁稿 | AI 節點（內含小 Loop ≤ 2 輪） | `outline.md` + **該頁對應證據卡** | **嚴禁引用卡片以外內容**；單頁字數不超標 | `drafts/slide-01.md`..`NN.md` | 內迴圈自檢出處與字數（最多 2 輪） |
 | 7. 忠實度檢查 | 腳本 + **獨立子代理** | `drafts/` + `cards/` + `wiki/` | **不可自己改稿**；AI 審查必須開啟獨立新對話／子代理，不自審自稿 | `python scripts/gate2_check_drafts.py <topic_dir>` + 獨立子代理產出 `fidelity_review.md` | **只退回重修出錯的那一頁**（其餘頁不動）；若卡片錯則退回 **Node 3** |
 | 8. 渲染 HTML | AI 節點 | 已通過之 `drafts/` | **嚴禁私自更動逐頁稿事實文字與數字** | `deck.html`（16:9 教學投影片＋鍵盤導覽＋視覺圖表） | — |
-| 9. 渲染與溢出檢查 | 腳本 + 渲染驗證 | `deck.html` + `drafts/` | 不可自己改文字硬塞版面 | `python scripts/gate3_check_html.py <topic_dir>` + 實際瀏覽器溢出檢查 | 版面溢出／字太多 → **退回 Node 6 縮短逐頁稿**（非硬縮小字體）；CSS 排版問題 → 退回 **Node 8**（最多 2 輪） |
+| 9. 渲染與溢出檢查 | 腳本 + 無頭 Chrome | `deck.html` + `drafts/` | 不可自己改文字硬塞版面 | `python scripts/gate3_check_html.py <topic_dir>` + `python scripts/check_overflow_headless.py <topic_dir>`（1280×720 像素級零溢出驗證） | 版面溢出／字太多 → **退回 Node 6 縮短逐頁稿**（非硬縮小字體）；CSS／違規字詞問題 → 退回 **Node 8**（最多 2 輪） |
 | 10. 交件 | AI 節點 | 所有關卡輸出與 `deck.html` | 不可隱瞞未通過的警告 | `report.md` + `git commit` | — |
